@@ -182,7 +182,7 @@ func TestAllTypes(t *testing.T) {
 		`Error on TestStruct3.I16: strconv.ParseInt: parsing "-32769": value out of range`,
 		`Error on TestStruct3.I32: strconv.ParseInt: parsing "-2147483649": value out of range`,
 	}, "\n") {
-		t.Fatal("Expected errors not correct")
+		t.Fatal("Expected errors not correct: " + err.Error())
 	}
 
 	//Make sure we get back the same struct on a second attempt
@@ -216,7 +216,7 @@ func TestAllTypes(t *testing.T) {
 		`Error on TestStruct3.RB: Pointer not initialized`,
 		`Error on TestStruct3.B: Pointer not initialized`,
 	}, "\n") {
-		t.Fatal("Expected errors #2 not correct")
+		t.Fatal("Expected errors #2 not correct: " + err.Error())
 	}
 	_ = rows.Close()
 

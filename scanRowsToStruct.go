@@ -71,6 +71,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"unsafe"
 )
@@ -84,8 +85,8 @@ type RowReader struct {
 
 // CreateReader creates a RowReader from the StructModel
 func (sm StructModel) CreateReader() RowReader {
-	rb := make([]sql.RawBytes, len(sm))
-	rba := make([]any, len(sm))
+	rb := make([]sql.RawBytes, len(sm.fields))
+	rba := make([]any, len(sm.fields))
 	for i := range rb {
 		rba[i] = &rb[i]
 	}
@@ -95,6 +96,11 @@ func (sm StructModel) CreateReader() RowReader {
 
 // ScanRows does an sql.Rows.Scan into the outPointer structure
 func (r RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
+	//Make sure the outPointer type matches
+	if err := r.checkType(outPointer); err != nil {
+		return err
+	}
+
 	if err := rows.Scan(r.rawBytesAny...); err != nil {
 		return err
 	}
@@ -103,6 +109,11 @@ func (r RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
 
 // ScanRow does an sql.Row.Scan into the outPointer structure
 func (r RowReader) ScanRow(row *sql.Row, outPointer any) error {
+	//Make sure the outPointer type matches
+	if err := r.checkType(outPointer); err != nil {
+		return err
+	}
+
 	//Unfortunately, sql.Row.Scan does not support rawBytes, so we are going to have to recast the any-array to use *[]bytes instead
 	bytesArrAny := make([]any, len(r.rawBytesArr))
 	for i := range r.rawBytesArr {
@@ -115,10 +126,18 @@ func (r RowReader) ScanRow(row *sql.Row, outPointer any) error {
 	return r.convert(outPointer)
 }
 
+func (r RowReader) checkType(outPointer any) error {
+	//Make sure the outPointer type matches
+	t := reflect.TypeOf(outPointer)
+	if t.Kind() != reflect.Pointer || t.Elem() != r.sm.rType {
+		return fmt.Errorf("outPointer type is incorrect (%s)!=(*%s)", reflect.TypeOf(outPointer).String(), r.sm.rType.String())
+	}
+	return nil
+}
 func (r RowReader) convert(outPointer any) error {
 	var errs []string
 	startPointer := interface2Pointer(outPointer)
-	for i, sf := range r.sm {
+	for i, sf := range r.sm.fields {
 		p := unsafe.Add(startPointer, sf.offset)
 		if sf.isPointer {
 			if p = *(*unsafe.Pointer)(p); p == nil {

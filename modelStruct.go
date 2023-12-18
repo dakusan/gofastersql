@@ -12,7 +12,10 @@ import (
 )
 
 // StructModel holds the model of a structure for processing as a RowReader. StructModel is concurrency safe.
-type StructModel []structField
+type StructModel struct {
+	fields []structField
+	rType  reflect.Type
+}
 type structField struct {
 	offset    uintptr
 	converter func(in []byte, p unsafe.Pointer) error
@@ -33,7 +36,7 @@ func ModelStruct(s any) (StructModel, error) {
 	//Throw error if a structure is not passed
 	t := reflect.TypeOf(s)
 	if t.Kind() != reflect.Struct {
-		return nil, fmt.Errorf("Not a %s", reflect.Struct.String())
+		return StructModel{}, fmt.Errorf("Not a %s", reflect.Struct.String())
 	}
 
 	//If we already have the structure model cached then return it
@@ -60,7 +63,7 @@ func ModelStruct(s any) (StructModel, error) {
 	}
 
 	//Create the structure model
-	ret := make(StructModel, numFields)
+	ret := StructModel{make([]structField, numFields), t}
 	{
 		var processStruct func(reflect.Type, uintptr, string) []string
 		fieldPos := 0
@@ -128,14 +131,14 @@ func ModelStruct(s any) (StructModel, error) {
 				}
 
 				//Store the member
-				ret[fieldPos] = structField{parentOffset + fld.Offset, fn, parentName + fld.Name, isPointer}
+				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentName + fld.Name, isPointer}
 				fieldPos++
 			}
 
 			return
 		}
 		if err := processStruct(t, 0, ""); len(err) != 0 {
-			return nil, fmt.Errorf("Invalid types found for members:\n%s", strings.Join(err, "\n"))
+			return StructModel{}, fmt.Errorf("Invalid types found for members:\n%s", strings.Join(err, "\n"))
 		}
 	}
 
@@ -150,11 +153,5 @@ func ModelStruct(s any) (StructModel, error) {
 
 // Equals returns if these are from the same struct
 func (sm StructModel) Equals(sm2 StructModel) bool {
-	if sm == nil || sm2 == nil {
-		return (sm == nil) == (sm2 == nil)
-	}
-	if len(sm) != len(sm2) {
-		return false
-	}
-	return len(sm) == 0 || &sm[0] == &sm2[0]
+	return sm.rType == sm2.rType
 }
