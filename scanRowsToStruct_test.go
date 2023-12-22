@@ -76,14 +76,32 @@ type TestStruct9 struct { //4@0
 	P3 []byte //0
 }
 
+var sqlConn *sql.DB
+
+func setupSQLConnect() (*sql.Tx, error) {
+	//Connect to the database
+	if sqlConn == nil {
+		if db, err := sql.Open("mysql", SQLConnectString); err != nil {
+			return nil, err
+		} else if err := db.Ping(); err != nil {
+			return nil, err
+		} else {
+			sqlConn = db
+		}
+	}
+
+	//Create a transaction
+	if _tx, err := sqlConn.Begin(); err != nil {
+		return nil, err
+	} else {
+		return _tx, nil
+	}
+}
+
 func setupTestQuery() (*sql.Tx, *sql.Rows, error) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
-	if db, err := sql.Open("mysql", SQLConnectString); err != nil {
-		return nil, nil, err
-	} else if err := db.Ping(); err != nil {
-		return nil, nil, err
-	} else if _tx, err := db.Begin(); err != nil {
+	if _tx, err := setupSQLConnect(); err != nil {
 		return nil, nil, err
 	} else {
 		tx = _tx
@@ -91,8 +109,10 @@ func setupTestQuery() (*sql.Tx, *sql.Rows, error) {
 
 	//Create a temporary table and fill it with values 0, 1, 0
 	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i int) ENGINE=MEMORY`); err != nil {
+		rollbackTransactionAndRows(tx, nil)
 		return nil, nil, err
 	} else if _, err := tx.Exec(`INSERT INTO goTest VALUES (0), (1), (0);`); err != nil {
+		rollbackTransactionAndRows(tx, nil)
 		return nil, nil, err
 	}
 
@@ -159,6 +179,14 @@ func setupTestStruct() testStruct1 {
 	}
 }
 
+func rollbackTransactionAndRows(tx *sql.Tx, rows *sql.Rows) {
+	if rows != nil {
+		_ = rows.Close()
+	}
+	_, _ = tx.Exec(`DROP TEMPORARY TABLE goTest`)
+	_ = tx.Rollback()
+}
+
 func TestAllTypes(t *testing.T) {
 	//Init test data
 	var tx *sql.Tx
@@ -168,6 +196,7 @@ func TestAllTypes(t *testing.T) {
 	} else {
 		tx, rows = _tx, _rows
 	}
+	defer rollbackTransactionAndRows(tx, rows)
 	ts1 := setupTestStruct()
 
 	//Pass #1: Read into the structure and make sure it comes out correct
@@ -253,10 +282,11 @@ func TestAllTypes(t *testing.T) {
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
-	if _, _rows, err := setupTestQuery(); err != nil {
+	if _tx, _rows, err := setupTestQuery(); err != nil {
 		b.Fatal(err)
 	} else {
 		rows = _rows
+		defer rollbackTransactionAndRows(_tx, rows)
 	}
 	rows.Next()
 	b.ResetTimer()
@@ -281,10 +311,11 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
-	if _, _rows, err := setupTestQuery(); err != nil {
+	if _tx, _rows, err := setupTestQuery(); err != nil {
 		b.Fatal(err)
 	} else {
 		rows = _rows
+		defer rollbackTransactionAndRows(_tx, rows)
 	}
 	rows.Next()
 	b.ResetTimer()
