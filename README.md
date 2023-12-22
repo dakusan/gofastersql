@@ -22,7 +22,7 @@ GoFasterSQL supports the following member types in structures, including typedef
   - `int`, `int8`, `int16`, `int32`, `int64`
   - `uint`, `uint8`, `uint16`, `uint32`, `uint64`
   - `float32`, `float64`
-  - `struct` **(cannot be a pointer)**
+  - `struct` *(struct pointers add a very tiny bit of extra overhead)*
 
 Example Usage:
 ```go
@@ -31,7 +31,7 @@ type book struct {
 	name string
 	cardCatalogID cardCatalogIdentifier
 	student
-	l loans
+	l *loans
 }
 type student struct {
 	currentBorrower string
@@ -51,7 +51,7 @@ if err != nil {
 msr := ms.CreateReader()
 rows, _ := db.Query("SELECT * FROM books")
 for rows.Next() {
-	var temp book
+	temp := book{l:new(loans)}
 	if err := msr.ScanRows(rows, &temp); err != nil {
 		panic(err)
 	}

@@ -19,7 +19,7 @@ GoFasterSQL supports the following member types in structures, including typedef
   - int, int8, int16, int32, int64
   - uint, uint8, uint16, uint32, uint64
   - float32, float64
-  - struct (cannot be a pointer)
+  - struct (struct pointers add a very tiny bit of extra overhead)
 
 Example Usage:
 
@@ -28,7 +28,7 @@ Example Usage:
 		name string
 		cardCatalogID cardCatalogIdentifier
 		student
-		l loans
+		l *loans
 	}
 	type student struct {
 		currentBorrower string
@@ -48,7 +48,7 @@ Example Usage:
 	msr := ms.CreateReader()
 	rows, _ := db.Query("SELECT * FROM books")
 	for rows.Next() {
-		var temp book
+		temp := book{l:new(loans)}
 		if err := msr.ScanRows(rows, &temp); err != nil {
 			panic(err)
 		}
@@ -80,7 +80,8 @@ import (
 type RowReader struct {
 	sm          StructModel
 	rawBytesArr []sql.RawBytes
-	rawBytesAny []any //This holds pointers to each member of rawBytesArr
+	rawBytesAny []any            //This holds pointers to each member of rawBytesArr
+	pointers    []unsafe.Pointer //Used to calculate struct pointer locations. Index 0 is the root struct pointer
 }
 
 // CreateReader creates a RowReader from the StructModel
@@ -91,7 +92,7 @@ func (sm StructModel) CreateReader() RowReader {
 		rba[i] = &rb[i]
 	}
 
-	return RowReader{sm, rb, rba}
+	return RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
 }
 
 // ScanRows does an sql.Rows.Scan into the outPointer structure
@@ -135,10 +136,30 @@ func (r RowReader) checkType(outPointer any) error {
 	return nil
 }
 func (r RowReader) convert(outPointer any) error {
+	//Determine pointer indexes
 	var errs []string
-	startPointer := interface2Pointer(outPointer)
+	r.pointers[0] = interface2Pointer(outPointer)
+	for i, p := range r.sm.pointers {
+		newPtr := unsafe.Pointer(nil)
+		if r.pointers[p.parentIndex] != nil {
+			newPtr = *(*unsafe.Pointer)(unsafe.Add(r.pointers[p.parentIndex], p.offset))
+			if newPtr == nil {
+				errs = append(errs, fmt.Sprintf("Error on %s: %s", p.name, "Pointer not initialized"))
+			}
+		}
+
+		r.pointers[i+1] = newPtr
+	}
+
+	//Fill in data
 	for i, sf := range r.sm.fields {
-		p := unsafe.Add(startPointer, sf.offset)
+		//If parentPointer is not set then error was already issued
+		parentPointer := r.pointers[sf.pointerIndex]
+		if parentPointer == nil {
+			continue
+		}
+
+		p := unsafe.Add(parentPointer, sf.offset)
 		if sf.isPointer {
 			if p = *(*unsafe.Pointer)(p); p == nil {
 				errs = append(errs, fmt.Sprintf("Error on %s: %s", sf.name, "Pointer not initialized"))

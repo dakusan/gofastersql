@@ -13,14 +13,21 @@ import (
 
 // StructModel holds the model of a structure for processing as a RowReader. StructModel is concurrency safe.
 type StructModel struct {
-	fields []structField
-	rType  reflect.Type
+	fields   []structField
+	pointers []structPointer
+	rType    reflect.Type
 }
 type structField struct {
-	offset    uintptr
-	converter func(in []byte, p unsafe.Pointer) error
-	name      string
-	isPointer bool
+	offset       uintptr
+	converter    func(in []byte, p unsafe.Pointer) error
+	pointerIndex int
+	name         string
+	isPointer    bool
+}
+type structPointer struct {
+	parentIndex int
+	offset      uintptr
+	name        string
 }
 
 // Store structs for future lookups
@@ -49,13 +56,18 @@ func ModelStruct(s any) (StructModel, error) {
 
 	//Do a recursive count of the number of fields
 	numFields := 1
+	numStructPointers := 0
 	{
 		var doCount func(reflect.Type)
 		doCount = func(v reflect.Type) {
 			numFields += v.NumField() - 1
 			for i := 0; i < v.NumField(); i++ {
-				if v.Field(i).Type.Kind() == reflect.Struct {
-					doCount(v.Field(i).Type)
+				t := v.Field(i).Type
+				if t.Kind() == reflect.Struct {
+					doCount(t)
+				} else if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
+					numStructPointers++
+					doCount(t.Elem())
 				}
 			}
 		}
@@ -63,12 +75,13 @@ func ModelStruct(s any) (StructModel, error) {
 	}
 
 	//Create the structure model
-	ret := StructModel{make([]structField, numFields), t}
+	ret := StructModel{make([]structField, numFields), make([]structPointer, numStructPointers), t}
 	{
-		var processStruct func(reflect.Type, uintptr, string) []string
+		var processStruct func(reflect.Type, uintptr, int, string) []string
 		fieldPos := 0
+		structPointerPos := 0
 		byteArrayType, rawBytesType := reflect.TypeOf([]byte{}), reflect.TypeOf(sql.RawBytes{})
-		processStruct = func(v reflect.Type, parentOffset uintptr, parentName string) (retErr []string) {
+		processStruct = func(v reflect.Type, parentOffset uintptr, parentStructIndex int, parentName string) (retErr []string) {
 			for i := 0; i < v.NumField(); i++ {
 				//Handle pointers
 				fld := v.Field(i)
@@ -114,14 +127,16 @@ func ModelStruct(s any) (StructModel, error) {
 				case reflect.Bool:
 					fn = convBool
 				case reflect.Struct:
-					//Pointers to structures is not allowed due to how member offsets works
+					//Pointers to structures need to add their StructModel.pointers and redirect appropriately
+					offset, structIndex := parentOffset+fld.Offset, parentStructIndex
 					if isPointer {
-						retErr = append(retErr, fmt.Sprintf("%s%s: *%s (nested structures cannot be pointers)", parentName, fld.Name, fldType.String()))
-						continue
+						ret.pointers[structPointerPos] = structPointer{parentStructIndex, parentOffset + fld.Offset, parentName + fld.Name}
+						structPointerPos++
+						offset, structIndex = 0, structPointerPos //structIndex is +1 what you'd expect because RowReader.pointers[0] is the root struct pointer
 					}
 
 					//Recurse on structures
-					retErr = append(retErr, processStruct(fldType, parentOffset+fld.Offset, parentName+fld.Name+".")...)
+					retErr = append(retErr, processStruct(fldType, offset, structIndex, parentName+fld.Name+".")...)
 					continue
 				}
 
@@ -131,13 +146,13 @@ func ModelStruct(s any) (StructModel, error) {
 				}
 
 				//Store the member
-				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentName + fld.Name, isPointer}
+				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentStructIndex, parentName + fld.Name, isPointer}
 				fieldPos++
 			}
 
 			return
 		}
-		if err := processStruct(t, 0, ""); len(err) != 0 {
+		if err := processStruct(t, 0, 0, ""); len(err) != 0 {
 			return StructModel{}, fmt.Errorf("Invalid types found for members:\n%s", strings.Join(err, "\n"))
 		}
 	}

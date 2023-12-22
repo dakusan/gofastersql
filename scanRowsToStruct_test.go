@@ -14,51 +14,66 @@ const (
 	NumBenchmarkPasses = 100_000
 )
 
-type testStruct1 struct {
-	P1  string
-	TS2 TestStruct2
-	P2  *int
-	TestStruct3
-	P3 []byte
+type testStruct1 struct { //0@0
+	P1          string       //0
+	TestStruct2              //16
+	P2          *int         //152
+	TS3         TestStruct3  //160
+	TS9         *TestStruct9 //248
 }
-type TestStruct2 struct {
-	U   uint
-	U8  uint8
-	U16 uint16
-	U32 uint32
-	U64 uint64
-	I   int
-	I8  int8
-	I16 int16
-	I32 int32
-	I64 int64
-	F32 float32
-	F64 *float64
-	S   string
-	BA  []byte
-	RB  sql.RawBytes
-	B   bool
+type TestStruct2 struct { //0@16
+	U   uint         //16
+	U8  uint8        //24
+	U16 uint16       //26
+	U32 uint32       //28
+	U64 uint64       //32
+	I   int          //40
+	I8  int8         //48
+	I16 int16        //50
+	I32 int32        //52
+	I64 int64        //56
+	F32 float32      //64
+	F64 *float64     //72
+	S   string       //80
+	BA  []byte       //96
+	RB  sql.RawBytes //120
+	B   bool         //144
 }
-type TestStruct3 struct {
-	TestStruct4
-	I   *int
-	I8  *int8
-	I16 *int16
-	I32 *int32
-	I64 *int64
-	F32 *float32
-	F64 float64
-	S   *string
-	BA  *[]byte
-	RB  *sql.RawBytes
-	B   *bool
+type TestStruct3 struct { //0@160
+	TS4         *TestStruct4  //160
+	TestStruct5               //168
+	F32         *float32      //208
+	F64         float64       //216
+	TS6         *TestStruct6  //224
+	RB          *sql.RawBytes //232
+	B           *bool         //240
 }
-type TestStruct4 struct {
-	U   *uint
-	U8  *uint8
-	U16 *uint16
-	U32 *uint32
-	U64 *uint64
+type TestStruct4 struct { //1@0
+	U   *uint   //0
+	U8  *uint8  //8
+	U16 *uint16 //16
+	U32 *uint32 //24
+	U64 *uint64 //32
+}
+type TestStruct5 struct { //0@168
+	I   *int   //168
+	I8  *int8  //176
+	I16 *int16 //184
+	I32 *int32 //192
+	I64 *int64 //200
+}
+type TestStruct6 struct { //2@0
+	TS7         *TestStruct7 //0
+	TestStruct8              //8
+}
+type TestStruct7 struct { //3@0
+	S *string //0
+}
+type TestStruct8 struct { //2@8
+	BA *[]byte //8
+}
+type TestStruct9 struct { //4@0
+	P3 []byte //0
 }
 
 func setupTestQuery() (*sql.Tx, *sql.Rows, error) {
@@ -86,19 +101,19 @@ func setupTestQuery() (*sql.Tx, *sql.Rows, error) {
 	//Return #2 will have sets #1,#2,#4 overflow (though some of the 64 bit ones cant overflow in SQL for testing)
 	rows, err := tx.Query(`
 SELECT
-	/*P1 and TS2*/
+	/*P1 and TestStruct2*/
 	CONCAT('P1-', i),
 	2+i, (1<<8)-1+i, (1<<16)-1+i, (1<<32)-1+i, 0xFFFFFFFFFFFFFFFF+0, /*Set 1*/
 	2+i, (1<<7)-1+i, (1<<15)-1+i, (1<<31)-1+i, (1<<63)-1+i,          /*Set 2*/
 	1.1+i, 5.5+i, CONCAT('str-', i), CONCAT('ba-', i), CONCAT('rb-', i), i,
 
-	/*P2 and TestStruct3*/
+	/*P2 and TS3*/
 	5+i,
 	20+i, (1<<8)-2+i, (1<<16)-2+i, (1<<32)-2+i, 0xFFFFFFFFFFFFFFFF+0,/*Set 3*/
 	20+i, CAST(1<<7 AS INT)*-1-i, CAST(1<<15 AS INT)*-1-i, CAST(1<<31 AS INT)*-1-i, CAST((1<<62)-1 AS SIGNED)*-2-2-0, /*Set 4*/
 	11.11+i, 12.12+i, CONCAT('strP-', i), CONCAT('baP-', i), CONCAT('rbP-', i), i,
 
-	/*P3*/
+	/*TS9*/
 	CONCAT('P3-', i)
 FROM goTest
 	`)
@@ -110,28 +125,37 @@ func setupTestStruct() testStruct1 {
 	//Create a structure to receive all the valid values with all types represented
 	return testStruct1{
 		P2: new(int),
-		TS2: TestStruct2{
+		TestStruct2: TestStruct2{
 			F64: new(float64),
 		},
-		TestStruct3: TestStruct3{
-			TestStruct4: TestStruct4{
+		TS3: TestStruct3{
+			TS4: &TestStruct4{
 				U:   new(uint),
 				U8:  new(uint8),
 				U16: new(uint16),
 				U32: new(uint32),
 				U64: new(uint64),
 			},
-			I:   new(int),
-			I8:  new(int8),
-			I16: new(int16),
-			I32: new(int32),
-			I64: new(int64),
+			TestStruct5: TestStruct5{
+				I:   new(int),
+				I8:  new(int8),
+				I16: new(int16),
+				I32: new(int32),
+				I64: new(int64),
+			},
 			F32: new(float32),
-			S:   new(string),
-			BA:  new([]byte),
-			RB:  new(sql.RawBytes),
-			B:   new(bool),
+			TS6: &TestStruct6{
+				TS7: &TestStruct7{
+					S: new(string),
+				},
+				TestStruct8: TestStruct8{
+					BA: new([]byte),
+				},
+			},
+			RB: new(sql.RawBytes),
+			B:  new(bool),
 		},
+		TS9: &TestStruct9{},
 	}
 }
 
@@ -162,7 +186,7 @@ func TestAllTypes(t *testing.T) {
 	if str, err := json.Marshal(ts1); err != nil {
 		t.Fatal(err)
 	} else if //goland:noinspection SpellCheckingInspection
-	string(str) != `{"P1":"P1-0","TS2":{"U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false},"P2":5,"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615,"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"S":"strP-0","BA":"YmFQLTA=","RB":"cmJQLTA=","B":false,"P3":"UDMtMA=="}` {
+	string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA=="}}` {
 		t.Fatal("Structure json marshal did not match")
 	}
 
@@ -171,18 +195,18 @@ func TestAllTypes(t *testing.T) {
 	if err := rr.ScanRows(rows, &ts1); err == nil {
 		t.Fatal("Expected errors not found")
 	} else if err.Error() != strings.Join([]string{
-		`Error on TS2.U8: strconv.ParseUint: parsing "256": value out of range`,
-		`Error on TS2.U16: strconv.ParseUint: parsing "65536": value out of range`,
-		`Error on TS2.U32: strconv.ParseUint: parsing "4294967296": value out of range`,
-		`Error on TS2.I8: strconv.ParseInt: parsing "128": value out of range`,
-		`Error on TS2.I16: strconv.ParseInt: parsing "32768": value out of range`,
-		`Error on TS2.I32: strconv.ParseInt: parsing "2147483648": value out of range`,
-		`Error on TS2.I64: strconv.ParseInt: parsing "9223372036854775808": value out of range`,
-		`Error on TestStruct3.I8: strconv.ParseInt: parsing "-129": value out of range`,
-		`Error on TestStruct3.I16: strconv.ParseInt: parsing "-32769": value out of range`,
-		`Error on TestStruct3.I32: strconv.ParseInt: parsing "-2147483649": value out of range`,
+		`Error on TestStruct2.U8: strconv.ParseUint: parsing "256": value out of range`,
+		`Error on TestStruct2.U16: strconv.ParseUint: parsing "65536": value out of range`,
+		`Error on TestStruct2.U32: strconv.ParseUint: parsing "4294967296": value out of range`,
+		`Error on TestStruct2.I8: strconv.ParseInt: parsing "128": value out of range`,
+		`Error on TestStruct2.I16: strconv.ParseInt: parsing "32768": value out of range`,
+		`Error on TestStruct2.I32: strconv.ParseInt: parsing "2147483648": value out of range`,
+		`Error on TestStruct2.I64: strconv.ParseInt: parsing "9223372036854775808": value out of range`,
+		`Error on TS3.TestStruct5.I8: strconv.ParseInt: parsing "-129": value out of range`,
+		`Error on TS3.TestStruct5.I16: strconv.ParseInt: parsing "-32769": value out of range`,
+		`Error on TS3.TestStruct5.I32: strconv.ParseInt: parsing "-2147483649": value out of range`,
 	}, "\n") {
-		t.Fatal("Expected errors not correct: " + err.Error())
+		t.Fatal("Expected errors not correct:\n" + err.Error())
 	}
 
 	//Make sure we get back the same struct on a second attempt
@@ -198,25 +222,21 @@ func TestAllTypes(t *testing.T) {
 	if err := rr.ScanRows(rows, &ts2); err == nil {
 		t.Fatal("Expected errors #2 not found")
 	} else if err.Error() != strings.Join([]string{
-		`Error on TS2.F64: Pointer not initialized`,
+		`Error on TS3.TS4: Pointer not initialized`,
+		`Error on TS3.TS6: Pointer not initialized`,
+		`Error on TS9: Pointer not initialized`,
+		`Error on TestStruct2.F64: Pointer not initialized`,
 		`Error on P2: Pointer not initialized`,
-		`Error on TestStruct3.TestStruct4.U: Pointer not initialized`,
-		`Error on TestStruct3.TestStruct4.U8: Pointer not initialized`,
-		`Error on TestStruct3.TestStruct4.U16: Pointer not initialized`,
-		`Error on TestStruct3.TestStruct4.U32: Pointer not initialized`,
-		`Error on TestStruct3.TestStruct4.U64: Pointer not initialized`,
-		`Error on TestStruct3.I: Pointer not initialized`,
-		`Error on TestStruct3.I8: Pointer not initialized`,
-		`Error on TestStruct3.I16: Pointer not initialized`,
-		`Error on TestStruct3.I32: Pointer not initialized`,
-		`Error on TestStruct3.I64: Pointer not initialized`,
-		`Error on TestStruct3.F32: Pointer not initialized`,
-		`Error on TestStruct3.S: Pointer not initialized`,
-		`Error on TestStruct3.BA: Pointer not initialized`,
-		`Error on TestStruct3.RB: Pointer not initialized`,
-		`Error on TestStruct3.B: Pointer not initialized`,
+		`Error on TS3.TestStruct5.I: Pointer not initialized`,
+		`Error on TS3.TestStruct5.I8: Pointer not initialized`,
+		`Error on TS3.TestStruct5.I16: Pointer not initialized`,
+		`Error on TS3.TestStruct5.I32: Pointer not initialized`,
+		`Error on TS3.TestStruct5.I64: Pointer not initialized`,
+		`Error on TS3.F32: Pointer not initialized`,
+		`Error on TS3.RB: Pointer not initialized`,
+		`Error on TS3.B: Pointer not initialized`,
 	}, "\n") {
-		t.Fatal("Expected errors #2 not correct: " + err.Error())
+		t.Fatal("Expected errors #2 not correct:\n" + err.Error())
 	}
 	_ = rows.Close()
 
@@ -277,40 +297,40 @@ func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 		for n := 0; n < NumBenchmarkPasses; n++ {
 			if err := rows.Scan(
 				&ts1.P1,
-				&ts1.TS2.U,
-				&ts1.TS2.U8,
-				&ts1.TS2.U16,
-				&ts1.TS2.U32,
-				&ts1.TS2.U64,
-				&ts1.TS2.I,
-				&ts1.TS2.I8,
-				&ts1.TS2.I16,
-				&ts1.TS2.I32,
-				&ts1.TS2.I64,
-				&ts1.TS2.F32,
-				ts1.TS2.F64,
-				&ts1.TS2.S,
-				&ts1.TS2.BA,
-				&ts1.TS2.RB,
-				&ts1.TS2.B,
+				&ts1.U,
+				&ts1.U8,
+				&ts1.U16,
+				&ts1.U32,
+				&ts1.U64,
+				&ts1.I,
+				&ts1.I8,
+				&ts1.I16,
+				&ts1.I32,
+				&ts1.I64,
+				&ts1.F32,
+				ts1.F64,
+				&ts1.S,
+				&ts1.BA,
+				&ts1.RB,
+				&ts1.B,
 				&ts1.P2,
-				ts1.TestStruct3.TestStruct4.U,
-				ts1.TestStruct3.TestStruct4.U8,
-				ts1.TestStruct3.TestStruct4.U16,
-				ts1.TestStruct3.TestStruct4.U32,
-				ts1.TestStruct3.TestStruct4.U64,
-				ts1.TestStruct3.I,
-				ts1.TestStruct3.I8,
-				ts1.TestStruct3.I16,
-				ts1.TestStruct3.I32,
-				ts1.TestStruct3.I64,
-				ts1.TestStruct3.F32,
-				&ts1.TestStruct3.F64,
-				ts1.TestStruct3.S,
-				ts1.TestStruct3.BA,
-				ts1.TestStruct3.RB,
-				ts1.TestStruct3.B,
-				&ts1.P3,
+				ts1.TS3.TS4.U,
+				ts1.TS3.TS4.U8,
+				ts1.TS3.TS4.U16,
+				ts1.TS3.TS4.U32,
+				ts1.TS3.TS4.U64,
+				ts1.TS3.TestStruct5.I,
+				ts1.TS3.TestStruct5.I8,
+				ts1.TS3.TestStruct5.I16,
+				ts1.TS3.TestStruct5.I32,
+				ts1.TS3.TestStruct5.I64,
+				ts1.TS3.F32,
+				&ts1.TS3.F64,
+				ts1.TS3.TS6.TS7.S,
+				ts1.TS3.TS6.BA,
+				ts1.TS3.RB,
+				ts1.TS3.B,
+				&ts1.TS9.P3,
 			); err != nil {
 				b.Fatal(err)
 			}
