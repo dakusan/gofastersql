@@ -9,7 +9,9 @@ import (
 )
 
 func convUNum[T uint8 | uint16 | uint32 | uint64](in []byte, p unsafe.Pointer, bits int) error {
-	if n, err := strconv.ParseUint(b2s(in), 10, bits); err != nil {
+	if in == nil {
+		*(*T)(p) = 0
+	} else if n, err := strconv.ParseUint(b2s(in), 10, bits); err != nil {
 		return err
 	} else {
 		*(*T)(p) = T(n)
@@ -17,7 +19,9 @@ func convUNum[T uint8 | uint16 | uint32 | uint64](in []byte, p unsafe.Pointer, b
 	return nil
 }
 func convINum[T int8 | int16 | int32 | int64](in []byte, p unsafe.Pointer, bits int) error {
-	if n, err := strconv.ParseInt(b2s(in), 10, bits); err != nil {
+	if in == nil {
+		*(*T)(p) = 0
+	} else if n, err := strconv.ParseInt(b2s(in), 10, bits); err != nil {
 		return err
 	} else {
 		*(*T)(p) = T(n)
@@ -25,7 +29,9 @@ func convINum[T int8 | int16 | int32 | int64](in []byte, p unsafe.Pointer, bits 
 	return nil
 }
 func convFloat[T float32 | float64](in []byte, p unsafe.Pointer, bits int) error {
-	if n, err := strconv.ParseFloat(b2s(in), bits); err != nil {
+	if in == nil {
+		*(*T)(p) = 0
+	} else if n, err := strconv.ParseFloat(b2s(in), bits); err != nil {
 		return err
 	} else {
 		*(*T)(p) = T(n)
@@ -72,7 +78,11 @@ func convRawBytes(in []byte, p unsafe.Pointer) error {
 	return nil
 }
 func convBool(in []byte, p unsafe.Pointer) error {
-	*(*bool)(p) = in[0] == '1'
+	if in == nil {
+		*(*bool)(p) = false
+	} else {
+		*(*bool)(p) = in[0] == '1'
+	}
 	return nil
 }
 func convFloat32(in []byte, p unsafe.Pointer) error {

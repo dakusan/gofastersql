@@ -216,7 +216,7 @@ func TestAllTypes(t *testing.T) {
 		t.Fatal(err)
 	} else if //goland:noinspection SpellCheckingInspection
 	string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA=="}}` {
-		t.Fatal("Structure json marshal did not match")
+		t.Fatal("Structure json marshal did not match: " + string(str))
 	}
 
 	//Pass #2: Check for the expected overflow errors
@@ -276,6 +276,35 @@ func TestAllTypes(t *testing.T) {
 		t.Fatal(err)
 	} else if st.a != 1 || st.b != 3 {
 		t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
+	}
+}
+
+func TestNulls(t *testing.T) {
+	//Connect to the database and create a transaction
+	var tx *sql.Tx
+	var rows *sql.Rows
+	if _tx, err := setupSQLConnect(); err != nil {
+		t.Fatal(err)
+	} else {
+		tx = _tx
+	}
+	defer rollbackTransactionAndRows(tx, rows)
+
+	//Create a temporary table and fill it with values (5, NULL)
+	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i1 int NULL, i2 int NULL) ENGINE=MEMORY`); err != nil {
+		t.Fatal(err)
+	} else if _, err := tx.Exec(`INSERT INTO goTest VALUES (5, NULL);`); err != nil {
+		t.Fatal(err)
+	}
+
+	//Run test for putting null onto non-null scalar types
+	ts2 := TestStruct2{F64: new(float64)}
+	if err := ScanRow(tx.QueryRow(`SELECT i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2 FROM goTest`), &ts2); err != nil {
+		t.Fatal(err)
+	} else if str, err := json.Marshal(ts2); err != nil {
+		t.Fatal(err)
+	} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":"","RB":null,"B":false}` {
+		t.Fatal("Nulled structure json marshal did not match: " + string(str))
 	}
 }
 
