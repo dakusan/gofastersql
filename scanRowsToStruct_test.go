@@ -199,8 +199,7 @@ func TestAllTypes(t *testing.T) {
 	defer rollbackTransactionAndRows(tx, rows)
 	ts1 := setupTestStruct()
 
-	//Pass #1: Read into the structure and make sure it comes out correct
-	rows.Next()
+	//Prepare structures for the tests
 	var rr RowReader
 	var sm StructModel
 	if _sm, err := ModelStruct(ts1); err != nil {
@@ -209,74 +208,86 @@ func TestAllTypes(t *testing.T) {
 		sm = _sm
 		rr = sm.CreateReader()
 	}
-	if err := rr.ScanRows(rows, &ts1); err != nil {
-		t.Fatal(err)
-	}
-	if str, err := json.Marshal(ts1); err != nil {
-		t.Fatal(err)
-	} else if //goland:noinspection SpellCheckingInspection
-	string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA=="}}` {
-		t.Fatal("Structure json marshal did not match: " + string(str))
-	}
+
+	//Pass #1: Read into the structure and make sure it comes out correct
+	t.Run("Read into structure", func(t *testing.T) {
+		rows.Next()
+		if err := rr.ScanRows(rows, &ts1); err != nil {
+			t.Fatal(err)
+		} else if str, err := json.Marshal(ts1); err != nil {
+			t.Fatal(err)
+		} else if //goland:noinspection SpellCheckingInspection
+		string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA=="}}` {
+			t.Fatal("Structure json marshal did not match: " + string(str))
+		}
+	})
 
 	//Pass #2: Check for the expected overflow errors
-	rows.Next()
-	if err := rr.ScanRows(rows, &ts1); err == nil {
-		t.Fatal("Expected errors not found")
-	} else if err.Error() != strings.Join([]string{
-		`Error on TestStruct2.U8: strconv.ParseUint: parsing "256": value out of range`,
-		`Error on TestStruct2.U16: strconv.ParseUint: parsing "65536": value out of range`,
-		`Error on TestStruct2.U32: strconv.ParseUint: parsing "4294967296": value out of range`,
-		`Error on TestStruct2.I8: strconv.ParseInt: parsing "128": value out of range`,
-		`Error on TestStruct2.I16: strconv.ParseInt: parsing "32768": value out of range`,
-		`Error on TestStruct2.I32: strconv.ParseInt: parsing "2147483648": value out of range`,
-		`Error on TestStruct2.I64: strconv.ParseInt: parsing "9223372036854775808": value out of range`,
-		`Error on TS3.TestStruct5.I8: strconv.ParseInt: parsing "-129": value out of range`,
-		`Error on TS3.TestStruct5.I16: strconv.ParseInt: parsing "-32769": value out of range`,
-		`Error on TS3.TestStruct5.I32: strconv.ParseInt: parsing "-2147483649": value out of range`,
-	}, "\n") {
-		t.Fatal("Expected errors not correct:\n" + err.Error())
-	}
+	t.Run("Expected overflow errors", func(t *testing.T) {
+		rows.Next()
+		if err := rr.ScanRows(rows, &ts1); err == nil {
+			t.Fatal("Expected errors not found")
+		} else if err.Error() != strings.Join([]string{
+			`Error on TestStruct2.U8: strconv.ParseUint: parsing "256": value out of range`,
+			`Error on TestStruct2.U16: strconv.ParseUint: parsing "65536": value out of range`,
+			`Error on TestStruct2.U32: strconv.ParseUint: parsing "4294967296": value out of range`,
+			`Error on TestStruct2.I8: strconv.ParseInt: parsing "128": value out of range`,
+			`Error on TestStruct2.I16: strconv.ParseInt: parsing "32768": value out of range`,
+			`Error on TestStruct2.I32: strconv.ParseInt: parsing "2147483648": value out of range`,
+			`Error on TestStruct2.I64: strconv.ParseInt: parsing "9223372036854775808": value out of range`,
+			`Error on TS3.TestStruct5.I8: strconv.ParseInt: parsing "-129": value out of range`,
+			`Error on TS3.TestStruct5.I16: strconv.ParseInt: parsing "-32769": value out of range`,
+			`Error on TS3.TestStruct5.I32: strconv.ParseInt: parsing "-2147483649": value out of range`,
+		}, "\n") {
+			t.Fatal("Expected errors not correct:\n" + err.Error())
+		}
+	})
 
 	//Make sure we get back the same struct on a second attempt
 	ts2 := testStruct1{}
-	if sm2, err := ModelStruct(ts2); err != nil {
-		t.Fatal(err)
-	} else if !sm2.Equals(sm) {
-		t.Fatal("Struct models are not for the same struct")
-	}
+	t.Run("Struct model equivalency", func(t *testing.T) {
+		if sm2, err := ModelStruct(ts2); err != nil {
+			t.Fatal(err)
+		} else if !sm2.Equals(sm) {
+			t.Fatal("Struct models are not for the same struct")
+		}
+	})
 
 	//Pass #3: Check for the expected nil pointer errors
-	rows.Next()
-	if err := rr.ScanRows(rows, &ts2); err == nil {
-		t.Fatal("Expected errors #2 not found")
-	} else if err.Error() != strings.Join([]string{
-		`Error on TS3.TS4: Pointer not initialized`,
-		`Error on TS3.TS6: Pointer not initialized`,
-		`Error on TS9: Pointer not initialized`,
-		`Error on TestStruct2.F64: Pointer not initialized`,
-		`Error on P2: Pointer not initialized`,
-		`Error on TS3.TestStruct5.I: Pointer not initialized`,
-		`Error on TS3.TestStruct5.I8: Pointer not initialized`,
-		`Error on TS3.TestStruct5.I16: Pointer not initialized`,
-		`Error on TS3.TestStruct5.I32: Pointer not initialized`,
-		`Error on TS3.TestStruct5.I64: Pointer not initialized`,
-		`Error on TS3.F32: Pointer not initialized`,
-		`Error on TS3.RB: Pointer not initialized`,
-		`Error on TS3.B: Pointer not initialized`,
-	}, "\n") {
-		t.Fatal("Expected errors #2 not correct:\n" + err.Error())
-	}
+	t.Run("Expected nil pointer errors", func(t *testing.T) {
+		rows.Next()
+		if err := rr.ScanRows(rows, &ts2); err == nil {
+			t.Fatal("Expected errors #2 not found")
+		} else if err.Error() != strings.Join([]string{
+			`Error on TS3.TS4: Pointer not initialized`,
+			`Error on TS3.TS6: Pointer not initialized`,
+			`Error on TS9: Pointer not initialized`,
+			`Error on TestStruct2.F64: Pointer not initialized`,
+			`Error on P2: Pointer not initialized`,
+			`Error on TS3.TestStruct5.I: Pointer not initialized`,
+			`Error on TS3.TestStruct5.I8: Pointer not initialized`,
+			`Error on TS3.TestStruct5.I16: Pointer not initialized`,
+			`Error on TS3.TestStruct5.I32: Pointer not initialized`,
+			`Error on TS3.TestStruct5.I64: Pointer not initialized`,
+			`Error on TS3.F32: Pointer not initialized`,
+			`Error on TS3.RB: Pointer not initialized`,
+			`Error on TS3.B: Pointer not initialized`,
+		}, "\n") {
+			t.Fatal("Expected errors #2 not correct:\n" + err.Error())
+		}
+	})
 	_ = rows.Close()
 
 	//Test ReadRow
-	type smallTest struct{ a, b int }
-	var st smallTest
-	if err := ScanRow(tx.QueryRow("SELECT i, i*3 FROM goTest LIMIT 1, 1"), &st); err != nil {
-		t.Fatal(err)
-	} else if st.a != 1 || st.b != 3 {
-		t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
-	}
+	t.Run("ReadRow", func(t *testing.T) {
+		type smallTest struct{ a, b int }
+		var st smallTest
+		if err := ScanRow(tx.QueryRow("SELECT i, i*3 FROM goTest LIMIT 1, 1"), &st); err != nil {
+			t.Fatal(err)
+		} else if st.a != 1 || st.b != 3 {
+			t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
+		}
+	})
 }
 
 func TestNulls(t *testing.T) {
@@ -298,14 +309,16 @@ func TestNulls(t *testing.T) {
 	}
 
 	//Run test for putting null onto non-null scalar types
-	ts2 := TestStruct2{F64: new(float64)}
-	if err := ScanRow(tx.QueryRow(`SELECT i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2 FROM goTest`), &ts2); err != nil {
-		t.Fatal(err)
-	} else if str, err := json.Marshal(ts2); err != nil {
-		t.Fatal(err)
-	} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":"","RB":null,"B":false}` {
-		t.Fatal("Nulled structure json marshal did not match: " + string(str))
-	}
+	t.Run("Non-null scalar with null values", func(t *testing.T) {
+		ts2 := TestStruct2{F64: new(float64)}
+		if err := ScanRow(tx.QueryRow(`SELECT i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2 FROM goTest`), &ts2); err != nil {
+			t.Fatal(err)
+		} else if str, err := json.Marshal(ts2); err != nil {
+			t.Fatal(err)
+		} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":"","RB":null,"B":false}` {
+			t.Fatal("Nulled structure json marshal did not match: " + string(str))
+		}
+	})
 }
 
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
