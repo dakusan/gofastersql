@@ -243,9 +243,7 @@ func TestAllTypes(t *testing.T) {
 	//Test ReadRow
 	type smallTest struct{ a, b int }
 	var st smallTest
-	if ms3, err := ModelStruct(st); err != nil {
-		t.Fatal(err)
-	} else if err := ms3.CreateReader().ScanRow(tx.QueryRow("SELECT i, i*3 FROM goTest LIMIT 1, 1"), &st); err != nil {
+	if err := ScanRow(tx.QueryRow("SELECT i, i*3 FROM goTest LIMIT 1, 1"), &st); err != nil {
 		t.Fatal(err)
 	} else if st.a != 1 || st.b != 3 {
 		t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))

@@ -64,6 +64,24 @@ is equivalent to:
 	rows.Scan(&temp.name, &temp.cardCatalogID, &temp.currentBorrower, &temp.currentBorrowerId, &temp.l.libraryID, &temp.l.loanData)
 
 and is much faster to boot!
+
+---
+
+Example 2: (Reading directly into multiple structs)
+
+	type foo struct { bar, baz int }
+	type moo struct { cow, calf int }
+	var fooVar foo
+	var mooVar moo
+
+	if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, 16"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+		panic(err)
+	}
+
+Result:
+
+	fooVar = {2, 4}
+	mooVar = {8, 16}
 */
 package gofastersql
 
@@ -125,6 +143,41 @@ func (r RowReader) ScanRow(row *sql.Row, outPointer any) error {
 		return err
 	}
 	return r.convert(outPointer)
+}
+
+/*
+ScanRow does an sql.Row.Scan into the output variable. Output must be a pointer.
+
+This is essentially the same as:
+
+	ModelStruct(*output).CreateReader().ScanRow(row, output)
+
+If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock, a lot of reflection manipulation, and a number of allocations.
+In some rare cases this function may even be slower than the native sql.Row.Scan() method.
+*/
+func ScanRow(row *sql.Row, output any) error {
+	//Get the StructModel
+	var sm StructModel
+	if reflect.TypeOf(output).Kind() != reflect.Pointer {
+		return errors.New("Output must be a pointer")
+	} else if _sm, err := ModelStruct(reflect.ValueOf(output).Elem().Interface()); err != nil {
+		return err
+	} else {
+		sm = _sm
+	}
+
+	//Create the RowReader
+	rb := make([]sql.RawBytes, len(sm.fields))
+	rba := make([]any, len(sm.fields))
+	for i := range rb {
+		rba[i] = (*[]byte)(&rb[i])
+	}
+	r := RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
+
+	if err := row.Scan(r.rawBytesAny...); err != nil {
+		return err
+	}
+	return r.convert(output)
 }
 
 func (r RowReader) checkType(outPointer any) error {

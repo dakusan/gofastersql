@@ -24,7 +24,8 @@ GoFasterSQL supports the following member types in structures, including typedef
   - `float32`, `float64`
   - `struct` *(struct pointers add a very tiny bit of extra overhead)*
 
-Example Usage:
+# Example Usage
+## Example #1
 ```go
 type cardCatalogIdentifier uint
 type book struct {
@@ -63,3 +64,25 @@ So:<br>
 is equivalent to:<br>
 `rows.Scan(&temp.name, &temp.cardCatalogID, &temp.currentBorrower, &temp.currentBorrowerId, &temp.l.libraryID, &temp.l.loanData)`<br>
 and is much faster to boot!
+
+## Example #2
+Reading a single row directly into multiple structs
+```go
+type foo struct { bar, baz int }
+type moo struct { cow, calf int }
+var fooVar foo
+var mooVar moo
+
+if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, 16"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+	panic(err)
+}
+```
+Result:
+```go
+	fooVar = {2, 4}
+	mooVar = {8, 16}
+```
+
+> [!warning]
+> If you are scanning a lot of rows it is recommended to use a `RowReader` instead of `gofastersql.ScanRow` as it bypasses a mutex read lock, a lot of reflection manipulation, and a number of allocations.
+In some rare cases `gofastersql.ScanRow` may even be slower than the native `sql.Row.Scan()` method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in `gofastersql.ScanRow`.
