@@ -8,6 +8,7 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"strings"
 	"testing"
+	"time"
 )
 
 const (
@@ -75,6 +76,8 @@ type TestStruct8 struct { //2@8
 }
 type TestStruct9 struct { //4@0
 	P3 []byte //0
+	T1 time.Time
+	T2 *time.Time
 }
 
 var sqlConn *sql.DB
@@ -85,6 +88,8 @@ func setupSQLConnect() (*sql.Tx, error) {
 		if db, err := sql.Open("mysql", SQLConnectString); err != nil {
 			return nil, err
 		} else if err := db.Ping(); err != nil {
+			return nil, err
+		} else if _, err := db.Exec(`SET time_zone = ?`, `UTC`); err != nil {
 			return nil, err
 		} else {
 			sqlConn = db
@@ -99,7 +104,9 @@ func setupSQLConnect() (*sql.Tx, error) {
 	}
 }
 
-func setupTestQuery() (*sql.Tx, *sql.Rows, error) {
+func setupTestQuery(
+	noTimeTesting bool, //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
+) (*sql.Tx, *sql.Rows, error) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
 	if _tx, err := setupSQLConnect(); err != nil {
@@ -135,7 +142,7 @@ SELECT
 	11.11+i, 12.12+i, CONCAT('strP-', i), CONCAT('baP-', i), CONCAT('rbP-', i), i,
 
 	/*TS9*/
-	CONCAT('P3-', i)
+	CONCAT('P3-', i), ` + cond(noTimeTesting, `null, null`, `CAST('2001-02-03 05:06:07.21' AS DATETIME(3)), UNIX_TIMESTAMP('2005-08-09 15:16:17.62')`) + `
 FROM goTest
 	`)
 
@@ -176,7 +183,9 @@ func setupTestStruct() testStruct1 {
 			RB: new(sql.RawBytes),
 			B:  new(bool),
 		},
-		TS9: &TestStruct9{},
+		TS9: &TestStruct9{
+			T2: new(time.Time),
+		},
 	}
 }
 
@@ -192,7 +201,7 @@ func TestAllTypes(t *testing.T) {
 	//Init test data
 	var tx *sql.Tx
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(); err != nil {
+	if _tx, _rows, err := setupTestQuery(false); err != nil {
 		t.Fatal(err)
 	} else {
 		tx, rows = _tx, _rows
@@ -218,7 +227,7 @@ func TestAllTypes(t *testing.T) {
 		} else if str, err := json.Marshal(ts1); err != nil {
 			t.Fatal(err)
 		} else if //goland:noinspection SpellCheckingInspection
-		string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA=="}}` {
+		string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA==","T1":"2001-02-03T05:06:07.21Z","T2":"2005-08-09T15:16:17.62Z"}}` {
 			t.Fatal("Structure json marshal did not match: " + string(str))
 		}
 	})
@@ -294,13 +303,12 @@ func TestAllTypes(t *testing.T) {
 func TestNulls(t *testing.T) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
-	var rows *sql.Rows
 	if _tx, err := setupSQLConnect(); err != nil {
 		t.Fatal(err)
 	} else {
 		tx = _tx
 	}
-	defer rollbackTransactionAndRows(tx, rows)
+	defer rollbackTransactionAndRows(tx, nil)
 
 	//Create a temporary table and fill it with values (5, NULL)
 	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i1 int NULL, i2 int NULL) ENGINE=MEMORY`); err != nil {
@@ -338,10 +346,11 @@ func TestNulls(t *testing.T) {
 			BA  nulltypes.NullByteArray
 			RB  nulltypes.NullRawBytes
 			B   nulltypes.NullBool
+			T   nulltypes.NullTime
 		}
 		tsn := TestStructNull{F64: new(nulltypes.NullFloat64)}
 		tsnToString := func() string {
-			list := []any{tsn.U8, tsn.U16, tsn.U32, tsn.U64, tsn.I8, tsn.I16, tsn.I32, tsn.I64, tsn.F32, tsn.F64, tsn.S, tsn.BA, tsn.RB, tsn.B}
+			list := []any{tsn.U8, tsn.U16, tsn.U32, tsn.U64, tsn.I8, tsn.I16, tsn.I32, tsn.I64, tsn.F32, tsn.F64, tsn.S, tsn.BA, tsn.RB, tsn.B, tsn.T}
 			s := make([]string, len(list))
 			for i, v := range list {
 				s[i] = (v).(fmt.Stringer).String()
@@ -349,15 +358,15 @@ func TestNulls(t *testing.T) {
 			return strings.Join(s, ",")
 		}
 
-		if err := ScanRow(tx.QueryRow(`SELECT i1+1, i2, i1+2, i2, i1+3, i2, i1+4, i2, i1+5, i2, i1+6, i2, i1+7, i2 FROM goTest`), &tsn); err != nil {
+		if err := ScanRow(tx.QueryRow(`SELECT i1+1, i2, i1+2, i2, i1+3, i2, i1+4, i2, i1+5, i2, i1+6, i2, i1+7, i2, '2001-02-03 05:06:07.21' FROM goTest`), &tsn); err != nil {
 			t.Fatal(err)
-		} else if tsnToString() != `6,NULL,7,NULL,8,NULL,9,NULL,10,NULL,11,NULL,12,NULL` {
+		} else if tsnToString() != `6,NULL,7,NULL,8,NULL,9,NULL,10,NULL,11,NULL,12,NULL,2001-02-03 05:06:07.21` {
 			t.Fatal("Nulled scalar marshal did not match: " + tsnToString())
 		}
 
-		if err := ScanRow(tx.QueryRow(`SELECT i2, i1+11, i2, i1+12, i2, i1+13, i2, i1+14, i2, i1+15, i2, i1+16, i2, i1+17 FROM goTest`), &tsn); err != nil {
+		if err := ScanRow(tx.QueryRow(`SELECT i2, i1+11, i2, i1+12, i2, i1+13, i2, i1+14, i2, i1+15, i2, i1+16, i2, i1+17, i2 FROM goTest`), &tsn); err != nil {
 			t.Fatal(err)
-		} else if tsnToString() != `NULL,16,NULL,17,NULL,18,NULL,19,NULL,20,NULL,21,NULL,false` {
+		} else if tsnToString() != `NULL,16,NULL,17,NULL,18,NULL,19,NULL,20,NULL,21,NULL,false,NULL` {
 			t.Fatal("Nulled scalar marshal #2 did not match: " + tsnToString())
 		}
 	})
@@ -366,7 +375,7 @@ func TestNulls(t *testing.T) {
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(); err != nil {
+	if _tx, _rows, err := setupTestQuery(true); err != nil {
 		b.Fatal(err)
 	} else {
 		rows = _rows
@@ -395,7 +404,7 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(); err != nil {
+	if _tx, _rows, err := setupTestQuery(true); err != nil {
 		b.Fatal(err)
 	} else {
 		rows = _rows
@@ -407,6 +416,7 @@ func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 	//Run the benchmark tests
 	for i := 0; i < b.N; i++ {
 		ts1 := setupTestStruct()
+		var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
 		for n := 0; n < NumBenchmarkPasses; n++ {
 			if err := rows.Scan(
 				&ts1.P1,
@@ -444,6 +454,8 @@ func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 				ts1.TS3.RB,
 				ts1.TS3.B,
 				&ts1.TS9.P3,
+				&timeBuff1,
+				&timeBuff2,
 			); err != nil {
 				b.Fatal(err)
 			}

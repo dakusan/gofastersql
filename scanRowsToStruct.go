@@ -19,6 +19,7 @@ GoFasterSQL supports the following member types in structures, including typedef
   - int, int8, int16, int32, int64
   - uint, uint8, uint16, uint32, uint64
   - float32, float64
+  - time.Time (also accepts unix timestamps)
   - struct (struct pointers add a very tiny bit of extra overhead)
 
 Example Usage:

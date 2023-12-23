@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	nt "github.com/dakusan/gofastersql/nulltypes"
 	"strconv"
+	"time"
 	"unsafe"
 )
 
@@ -76,6 +77,62 @@ func convBool(in []byte, p upt) error {
 	}
 	return nil
 }
+func convTime(in []byte, p upt) error {
+	//Null sets to timestamp=0
+	if in == nil {
+		*(*time.Time)(p) = time.Unix(0, 0).UTC()
+		return nil
+	}
+
+	//If there are only digits and an optional single decimal place, parse the number as a timestamp (with optional fractional seconds)
+	dotLoc, isValidFloat := -1, true
+	for loc, r := range in {
+		if r >= '0' && r <= '9' {
+			continue
+		}
+		if r != '.' || dotLoc != -1 {
+			isValidFloat = false
+			break
+		}
+		dotLoc = loc
+	}
+	if isValidFloat {
+		//Get the fractional part
+		fractionalSeconds := int64(0)
+		if dotLoc != -1 {
+			nanoBuff := []byte{'0', '0', '0', '0', '0', '0', '0', '0', '0'} //Maximum number of nanoseconds in a second is 9 digits
+			frac := b2s(in)[dotLoc+1:]
+			if len(frac) > len(nanoBuff) {
+				frac = frac[0:len(nanoBuff)]
+			}
+			copy(nanoBuff, frac)
+			if _fractionalSeconds, err := strconv.ParseInt(b2s(nanoBuff), 10, 64); err != nil {
+				return err
+			} else {
+				fractionalSeconds = _fractionalSeconds
+			}
+		} else {
+			//Reset the dot location to the end of the number
+			dotLoc = len(in)
+		}
+
+		//Get the integral part
+		if integralSeconds, err := strconv.ParseInt(b2s(in)[0:dotLoc], 10, 64); err != nil {
+			return err
+		} else {
+			*(*time.Time)(p) = time.Unix(integralSeconds, fractionalSeconds).UTC()
+		}
+		return nil
+	}
+
+	//Parse as mysql time
+	if t, err := time.Parse(`2006-01-02 15:04:05.99999`, b2s(in)); err != nil {
+		return err
+	} else {
+		*(*time.Time)(p) = t
+	}
+	return nil
+}
 
 // ---------------Conversion function for all NULLABLE scalar types--------------
 //I had to get a bit aggressive with name shortening methods below to keep everything on 1 line
@@ -94,3 +151,4 @@ func cvNS(b []byte, p upt) error   { return convString(null(b, p), upt(&(*nt.Nul
 func cvNRB(b []byte, p upt) error  { return convRawBytes(null(b, p), upt(&(*nt.NullRawBytes)(p).Val)) }
 func cvNBA(b []byte, p upt) error  { return convByteArray(null(b, p), upt(&(*nt.NullByteArray)(p).Val)) }
 func cvNB(b []byte, p upt) error   { return convBool(null(b, p), upt(&(*nt.NullBool)(p).Val)) }
+func cvNT(b []byte, p upt) error   { return convTime(null(b, p), upt(&(*nt.NullTime)(p).Val)) }

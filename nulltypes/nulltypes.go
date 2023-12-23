@@ -4,6 +4,7 @@ package nulltypes
 import (
 	"database/sql"
 	"fmt"
+	"time"
 )
 
 // NullInherit is the structure that all other Null structures inherit from
@@ -66,6 +67,10 @@ type NullRawBytes struct {
 	NullInherit
 	Val sql.RawBytes
 }
+type NullTime struct {
+	NullInherit
+	Val time.Time
+}
 
 func (t NullUint8) String() string     { return getStr(t.IsNull, t.Val) }
 func (t NullUint16) String() string    { return getStr(t.IsNull, t.Val) }
@@ -81,6 +86,7 @@ func (t NullBool) String() string      { return getStr(t.IsNull, t.Val) }
 func (t NullString) String() string    { return getStr(t.IsNull, t.Val) }
 func (t NullByteArray) String() string { return getStr(t.IsNull, string(t.Val)) }
 func (t NullRawBytes) String() string  { return getStr(t.IsNull, string(t.Val)) }
+func (t NullTime) String() string      { return getStr(t.IsNull, t.Val.Format(`2006-01-02 15:04:05.99999`)) }
 
 func getStr[T any](isNull bool, val T) string {
 	if isNull {

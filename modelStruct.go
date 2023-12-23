@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -49,6 +50,7 @@ var nullTypeStructs = map[reflect.Type]converterFunc{
 	reflect.TypeOf(nulltypes.NullRawBytes{}):  cvNRB,
 	reflect.TypeOf(nulltypes.NullByteArray{}): cvNBA,
 	reflect.TypeOf(nulltypes.NullBool{}):      cvNB,
+	reflect.TypeOf(nulltypes.NullTime{}):      cvNT,
 }
 var remLock sync.RWMutex
 
@@ -68,12 +70,16 @@ func ModelStruct(s any) (StructModel, error) {
 	}
 	remLock.RUnlock()
 
-	//Function to determine if a struct type is a NullInherit type
-	var isNullInheritType func(reflect.Type) bool
+	//Function to determine if a struct is considered a scalar type
+	var isNullInheritType, isScalarStruct func(reflect.Type) bool
 	{
 		nullInheritType := reflect.TypeOf(nulltypes.NullInherit{})
+		timeType := reflect.TypeOf(time.Time{})
 		isNullInheritType = func(t reflect.Type) bool {
 			return t.NumField() > 0 && t.Field(0).Type == nullInheritType
+		}
+		isScalarStruct = func(t reflect.Type) bool {
+			return isNullInheritType(t) || t == timeType
 		}
 	}
 
@@ -86,10 +92,10 @@ func ModelStruct(s any) (StructModel, error) {
 			numFields += v.NumField() - 1
 			for i := 0; i < v.NumField(); i++ {
 				t := v.Field(i).Type
-				if t.Kind() == reflect.Struct && !isNullInheritType(t) {
+				if t.Kind() == reflect.Struct && !isScalarStruct(t) {
 					doCount(t)
 				} else if t.Kind() == reflect.Pointer {
-					if el := t.Elem(); el.Kind() == reflect.Struct && !isNullInheritType(el) {
+					if el := t.Elem(); el.Kind() == reflect.Struct && !isScalarStruct(el) {
 						numStructPointers++
 						doCount(t.Elem())
 					}
@@ -152,9 +158,13 @@ func ModelStruct(s any) (StructModel, error) {
 				case reflect.Bool:
 					fn = convBool
 				case reflect.Struct:
-					//Check for nulltypes
-					if isNullInheritType(fldType) {
-						fn = nullTypeStructs[fldType]
+					//Check for scalar structs
+					if isScalarStruct(fldType) {
+						if isNullInheritType(fldType) {
+							fn = nullTypeStructs[fldType]
+						} else {
+							fn = convTime
+						}
 						break
 					}
 
