@@ -4,13 +4,16 @@ package gofastersql
 
 import (
 	"database/sql"
+	nt "github.com/dakusan/gofastersql/nulltypes"
 	"strconv"
 	"unsafe"
 )
 
-//--------------------------Generic numeric converters--------------------------
+type upt unsafe.Pointer
 
-func convUNum[T uint8 | uint16 | uint32 | uint64](in []byte, p unsafe.Pointer, bits int) error {
+//-------------------Generic numeric converters and (set)null-------------------
+
+func convUNum[T uint8 | uint16 | uint32 | uint64](in []byte, p upt, bits int) error {
 	if in == nil {
 		*(*T)(p) = 0
 	} else if n, err := strconv.ParseUint(b2s(in), 10, bits); err != nil {
@@ -20,7 +23,7 @@ func convUNum[T uint8 | uint16 | uint32 | uint64](in []byte, p unsafe.Pointer, b
 	}
 	return nil
 }
-func convINum[T int8 | int16 | int32 | int64](in []byte, p unsafe.Pointer, bits int) error {
+func convINum[T int8 | int16 | int32 | int64](in []byte, p upt, bits int) error {
 	if in == nil {
 		*(*T)(p) = 0
 	} else if n, err := strconv.ParseInt(b2s(in), 10, bits); err != nil {
@@ -30,7 +33,7 @@ func convINum[T int8 | int16 | int32 | int64](in []byte, p unsafe.Pointer, bits 
 	}
 	return nil
 }
-func convFloat[T float32 | float64](in []byte, p unsafe.Pointer, bits int) error {
+func convFloat[T float32 | float64](in []byte, p upt, bits int) error {
 	if in == nil {
 		*(*T)(p) = 0
 	} else if n, err := strconv.ParseFloat(b2s(in), bits); err != nil {
@@ -40,28 +43,32 @@ func convFloat[T float32 | float64](in []byte, p unsafe.Pointer, bits int) error
 	}
 	return nil
 }
+func null(in []byte, p upt) []byte {
+	(*nt.NullInherit)(p).IsNull = in == nil
+	return in
+}
 
 //-------------------Conversion function for all scalar types-------------------
 
-func convUint8(in []byte, p unsafe.Pointer) error    { return convUNum[uint8](in, p, 8) }
-func convUint16(in []byte, p unsafe.Pointer) error   { return convUNum[uint16](in, p, 16) }
-func convUint32(in []byte, p unsafe.Pointer) error   { return convUNum[uint32](in, p, 32) }
-func convUint64(in []byte, p unsafe.Pointer) error   { return convUNum[uint64](in, p, 64) }
-func convInt8(in []byte, p unsafe.Pointer) error     { return convINum[int8](in, p, 8) }
-func convInt16(in []byte, p unsafe.Pointer) error    { return convINum[int16](in, p, 16) }
-func convInt32(in []byte, p unsafe.Pointer) error    { return convINum[int32](in, p, 32) }
-func convInt64(in []byte, p unsafe.Pointer) error    { return convINum[int64](in, p, 64) }
-func convFloat32(in []byte, p unsafe.Pointer) error  { return convFloat[float32](in, p, 32) }
-func convFloat64(in []byte, p unsafe.Pointer) error  { return convFloat[float64](in, p, 64) }
-func convString(in []byte, p unsafe.Pointer) error   { *(*string)(p) = string(in); return nil }
-func convRawBytes(in []byte, p unsafe.Pointer) error { *(*sql.RawBytes)(p) = in; return nil }
-func convByteArray(in []byte, p unsafe.Pointer) error {
+func convUint8(in []byte, p upt) error    { return convUNum[uint8](in, p, 8) }
+func convUint16(in []byte, p upt) error   { return convUNum[uint16](in, p, 16) }
+func convUint32(in []byte, p upt) error   { return convUNum[uint32](in, p, 32) }
+func convUint64(in []byte, p upt) error   { return convUNum[uint64](in, p, 64) }
+func convInt8(in []byte, p upt) error     { return convINum[int8](in, p, 8) }
+func convInt16(in []byte, p upt) error    { return convINum[int16](in, p, 16) }
+func convInt32(in []byte, p upt) error    { return convINum[int32](in, p, 32) }
+func convInt64(in []byte, p upt) error    { return convINum[int64](in, p, 64) }
+func convFloat32(in []byte, p upt) error  { return convFloat[float32](in, p, 32) }
+func convFloat64(in []byte, p upt) error  { return convFloat[float64](in, p, 64) }
+func convString(in []byte, p upt) error   { *(*string)(p) = string(in); return nil }
+func convRawBytes(in []byte, p upt) error { *(*sql.RawBytes)(p) = in; return nil }
+func convByteArray(in []byte, p upt) error {
 	out := make([]byte, len(in))
 	copy(out, in)
 	*(*[]byte)(p) = out
 	return nil
 }
-func convBool(in []byte, p unsafe.Pointer) error {
+func convBool(in []byte, p upt) error {
 	if in == nil {
 		*(*bool)(p) = false
 	} else {
@@ -69,3 +76,21 @@ func convBool(in []byte, p unsafe.Pointer) error {
 	}
 	return nil
 }
+
+// ---------------Conversion function for all NULLABLE scalar types--------------
+//I had to get a bit aggressive with name shortening methods below to keep everything on 1 line
+
+func cvNU8(b []byte, p upt) error  { return convUint8(null(b, p), upt(&(*nt.NullUint8)(p).Val)) }
+func cvNU16(b []byte, p upt) error { return convUint16(null(b, p), upt(&(*nt.NullUint16)(p).Val)) }
+func cvNU32(b []byte, p upt) error { return convUint32(null(b, p), upt(&(*nt.NullUint32)(p).Val)) }
+func cvNU64(b []byte, p upt) error { return convUint64(null(b, p), upt(&(*nt.NullUint64)(p).Val)) }
+func cvNI8(b []byte, p upt) error  { return convInt8(null(b, p), upt(&(*nt.NullInt8)(p).Val)) }
+func cvNI16(b []byte, p upt) error { return convInt16(null(b, p), upt(&(*nt.NullInt16)(p).Val)) }
+func cvNI32(b []byte, p upt) error { return convInt32(null(b, p), upt(&(*nt.NullInt32)(p).Val)) }
+func cvNI64(b []byte, p upt) error { return convInt64(null(b, p), upt(&(*nt.NullInt64)(p).Val)) }
+func cvNF32(b []byte, p upt) error { return convFloat32(null(b, p), upt(&(*nt.NullFloat32)(p).Val)) }
+func cvNF64(b []byte, p upt) error { return convFloat64(null(b, p), upt(&(*nt.NullFloat64)(p).Val)) }
+func cvNS(b []byte, p upt) error   { return convString(null(b, p), upt(&(*nt.NullString)(p).Val)) }
+func cvNRB(b []byte, p upt) error  { return convRawBytes(null(b, p), upt(&(*nt.NullRawBytes)(p).Val)) }
+func cvNBA(b []byte, p upt) error  { return convByteArray(null(b, p), upt(&(*nt.NullByteArray)(p).Val)) }
+func cvNB(b []byte, p upt) error   { return convBool(null(b, p), upt(&(*nt.NullBool)(p).Val)) }

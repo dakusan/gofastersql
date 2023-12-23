@@ -5,6 +5,7 @@ package gofastersql
 import (
 	"database/sql"
 	"fmt"
+	"github.com/dakusan/gofastersql/nulltypes"
 	"reflect"
 	"strings"
 	"sync"
@@ -17,9 +18,10 @@ type StructModel struct {
 	pointers []structPointer
 	rType    reflect.Type
 }
+type converterFunc func(in []byte, p upt) error
 type structField struct {
 	offset       uintptr
-	converter    func(in []byte, p unsafe.Pointer) error
+	converter    converterFunc
 	pointerIndex int
 	name         string
 	isPointer    bool
@@ -31,12 +33,24 @@ type structPointer struct {
 }
 
 // Store structs for future lookups
-var remStructs map[reflect.Type]StructModel
-var remLock sync.RWMutex
-
-func init() {
-	remStructs = make(map[reflect.Type]StructModel)
+var remStructs = make(map[reflect.Type]StructModel)
+var nullTypeStructs = map[reflect.Type]converterFunc{
+	reflect.TypeOf(nulltypes.NullUint8{}):     cvNU8,
+	reflect.TypeOf(nulltypes.NullUint16{}):    cvNU16,
+	reflect.TypeOf(nulltypes.NullUint32{}):    cvNU32,
+	reflect.TypeOf(nulltypes.NullUint64{}):    cvNU64,
+	reflect.TypeOf(nulltypes.NullInt8{}):      cvNI8,
+	reflect.TypeOf(nulltypes.NullInt16{}):     cvNI16,
+	reflect.TypeOf(nulltypes.NullInt32{}):     cvNI32,
+	reflect.TypeOf(nulltypes.NullInt64{}):     cvNI64,
+	reflect.TypeOf(nulltypes.NullFloat32{}):   cvNF32,
+	reflect.TypeOf(nulltypes.NullFloat64{}):   cvNF64,
+	reflect.TypeOf(nulltypes.NullString{}):    cvNS,
+	reflect.TypeOf(nulltypes.NullRawBytes{}):  cvNRB,
+	reflect.TypeOf(nulltypes.NullByteArray{}): cvNBA,
+	reflect.TypeOf(nulltypes.NullBool{}):      cvNB,
 }
+var remLock sync.RWMutex
 
 // ModelStruct extracts the model of a structure for processing as a RowReader.
 func ModelStruct(s any) (StructModel, error) {
@@ -54,6 +68,15 @@ func ModelStruct(s any) (StructModel, error) {
 	}
 	remLock.RUnlock()
 
+	//Function to determine if a struct type is a NullInherit type
+	var isNullInheritType func(reflect.Type) bool
+	{
+		nullInheritType := reflect.TypeOf(nulltypes.NullInherit{})
+		isNullInheritType = func(t reflect.Type) bool {
+			return t.NumField() > 0 && t.Field(0).Type == nullInheritType
+		}
+	}
+
 	//Do a recursive count of the number of fields
 	numFields := 1
 	numStructPointers := 0
@@ -63,11 +86,13 @@ func ModelStruct(s any) (StructModel, error) {
 			numFields += v.NumField() - 1
 			for i := 0; i < v.NumField(); i++ {
 				t := v.Field(i).Type
-				if t.Kind() == reflect.Struct {
+				if t.Kind() == reflect.Struct && !isNullInheritType(t) {
 					doCount(t)
-				} else if t.Kind() == reflect.Pointer && t.Elem().Kind() == reflect.Struct {
-					numStructPointers++
-					doCount(t.Elem())
+				} else if t.Kind() == reflect.Pointer {
+					if el := t.Elem(); el.Kind() == reflect.Struct && !isNullInheritType(el) {
+						numStructPointers++
+						doCount(t.Elem())
+					}
 				}
 			}
 		}
@@ -92,7 +117,7 @@ func ModelStruct(s any) (StructModel, error) {
 				}
 
 				//Get the function pointer for the type
-				var fn func(in []byte, p unsafe.Pointer) error
+				var fn converterFunc
 				switch fldType.Kind() {
 				case reflect.String:
 					fn = convString
@@ -127,6 +152,12 @@ func ModelStruct(s any) (StructModel, error) {
 				case reflect.Bool:
 					fn = convBool
 				case reflect.Struct:
+					//Check for nulltypes
+					if isNullInheritType(fldType) {
+						fn = nullTypeStructs[fldType]
+						break
+					}
+
 					//Pointers to structures need to add their StructModel.pointers and redirect appropriately
 					offset, structIndex := parentOffset+fld.Offset, parentStructIndex
 					if isPointer {

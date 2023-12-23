@@ -13,7 +13,7 @@ The library’s ModelStruct function, upon its first invocation for a type, dete
 
 RowReaders, created via StructModel.CreateReader(), are not concurrency safe and can only be used in one goroutine at a time.
 
-GoFasterSQL supports the following member types in structures, including typedef derivatives, and pointers to any of these types. This flexibility ensures broad compatibility and ease of integration into diverse projects.
+GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package). This flexibility ensures broad compatibility and ease of integration into diverse projects.
   - string, []byte, sql.RawBytes
   - bool
   - int, int8, int16, int32, int64
@@ -70,18 +70,18 @@ and is much faster to boot!
 Example 2: (Reading directly into multiple structs)
 
 	type foo struct { bar, baz int }
-	type moo struct { cow, calf int }
+	type moo struct { cow, calf nulltypes.NullInt64 }
 	var fooVar foo
 	var mooVar moo
 
-	if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, 16"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+	if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, null"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
 		panic(err)
 	}
 
 Result:
 
 	fooVar = {2, 4}
-	mooVar = {8, 16}
+	mooVar = {8, NULL}
 */
 package gofastersql
 
@@ -219,7 +219,7 @@ func (r RowReader) convert(outPointer any) error {
 				continue
 			}
 		}
-		if err := sf.converter(r.rawBytesArr[i], p); err != nil {
+		if err := sf.converter(r.rawBytesArr[i], upt(p)); err != nil {
 			errs = append(errs, fmt.Sprintf("Error on %s: %s", sf.name, err.Error()))
 		}
 	}

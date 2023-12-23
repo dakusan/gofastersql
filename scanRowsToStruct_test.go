@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/dakusan/gofastersql/nulltypes"
 	_ "github.com/go-sql-driver/mysql"
 	"strings"
 	"testing"
@@ -317,6 +318,47 @@ func TestNulls(t *testing.T) {
 			t.Fatal(err)
 		} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":"","RB":null,"B":false}` {
 			t.Fatal("Nulled structure json marshal did not match: " + string(str))
+		}
+	})
+
+	//Run test for nullable scalar types
+	t.Run("Null scalars", func(t *testing.T) {
+		type TestStructNull struct {
+			U8  nulltypes.NullUint8
+			U16 nulltypes.NullUint16
+			U32 nulltypes.NullUint32
+			U64 nulltypes.NullUint64
+			I8  nulltypes.NullInt8
+			I16 nulltypes.NullInt16
+			I32 nulltypes.NullInt32
+			I64 nulltypes.NullInt64
+			F32 nulltypes.NullFloat32
+			F64 *nulltypes.NullFloat64
+			S   nulltypes.NullString
+			BA  nulltypes.NullByteArray
+			RB  nulltypes.NullRawBytes
+			B   nulltypes.NullBool
+		}
+		tsn := TestStructNull{F64: new(nulltypes.NullFloat64)}
+		tsnToString := func() string {
+			list := []any{tsn.U8, tsn.U16, tsn.U32, tsn.U64, tsn.I8, tsn.I16, tsn.I32, tsn.I64, tsn.F32, tsn.F64, tsn.S, tsn.BA, tsn.RB, tsn.B}
+			s := make([]string, len(list))
+			for i, v := range list {
+				s[i] = (v).(fmt.Stringer).String()
+			}
+			return strings.Join(s, ",")
+		}
+
+		if err := ScanRow(tx.QueryRow(`SELECT i1+1, i2, i1+2, i2, i1+3, i2, i1+4, i2, i1+5, i2, i1+6, i2, i1+7, i2 FROM goTest`), &tsn); err != nil {
+			t.Fatal(err)
+		} else if tsnToString() != `6,NULL,7,NULL,8,NULL,9,NULL,10,NULL,11,NULL,12,NULL` {
+			t.Fatal("Nulled scalar marshal did not match: " + tsnToString())
+		}
+
+		if err := ScanRow(tx.QueryRow(`SELECT i2, i1+11, i2, i1+12, i2, i1+13, i2, i1+14, i2, i1+15, i2, i1+16, i2, i1+17 FROM goTest`), &tsn); err != nil {
+			t.Fatal(err)
+		} else if tsnToString() != `NULL,16,NULL,17,NULL,18,NULL,19,NULL,20,NULL,21,NULL,false` {
+			t.Fatal("Nulled scalar marshal #2 did not match: " + tsnToString())
 		}
 	})
 }
