@@ -77,6 +77,11 @@ Example 2: (Reading directly into multiple structs)
 		panic(err)
 	}
 
+	//This is equivalent to the above statement but takes a lot more processing than ScanRow() and may be much slower
+	if err := gofastersql.ScanRowMulti(db.QueryRow("SELECT 2, 4, 8, null"), &fooVar, &mooVar); err != nil {
+		panic(err)
+	}
+
 Result:
 
 	fooVar = {2, 4}
@@ -152,6 +157,7 @@ This is essentially the same as:
 	ModelStruct(*output).CreateReader().ScanRow(row, output)
 
 If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
+In some cases this may even be slower than the native sql.Row.Scan() method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in gofastersql.ScanRow() and especially in gofastersql.ScanRowMulti().
 */
 func ScanRow[T any](row *sql.Row, output *T) error {
 	if sm, err := ModelStructType(reflect.TypeOf(output).Elem()); err != nil {
@@ -173,6 +179,24 @@ func scanRowReal(sm StructModel, row *sql.Row, output any) error {
 		return err
 	}
 	return r.convert(output)
+}
+
+/*
+ScanRowMulti does an sql.Row.Scan into the output variables. Output variables can be scalar types instead of structs. Output variables must be pointers.
+
+This is essentially the same as:
+
+	ScanRow(row, &struct{*outputType1; *outputType2; ...}{&output1, &output2, ...})
+
+If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
+This takes a lot more processing than ScanRow() and may be much slower.
+*/
+func ScanRowMulti(row *sql.Row, output ...any) error {
+	if sm, outArr, err := getMultipleStructsAsStructModel(output); err != nil {
+		return err
+	} else {
+		return scanRowReal(sm, row, &outArr[0])
+	}
 }
 
 func (r RowReader) checkType(outPointer any) error {

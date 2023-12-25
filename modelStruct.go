@@ -4,9 +4,11 @@ package gofastersql
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"github.com/dakusan/gofastersql/nulltypes"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,7 +21,7 @@ import (
 type StructModel struct {
 	fields   []structField   //The flattened list of members from a recursive structure search
 	pointers []structPointer //Data for structure pointers (recursive)
-	rType    reflect.Type    //The type of the top level structure. Used for lookup in remStructs
+	rType    reflect.Type    //The type of the top level structure. Used to confirm RowReader.ScanRow*() function “output” parameter type matches
 }
 type structField struct {
 	offset       uintptr       //The offset of the member in structure pointed at by RowReader.pointers[pointerIndex] (which is derived from StructModel.pointers)
@@ -233,6 +235,125 @@ func scalarToConversionFunc(fldType reflect.Type) converterFunc {
 
 	//Return no match
 	return nil
+}
+
+// Used by ScanRowMulti to create a StructModel
+func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
+	//Pull the StructModels that we already have cached
+	errs := make([]string, 0, len(vars))
+	varSMs := make([]StructModel, len(vars))
+	remLock.RLock()
+	for i, v := range vars {
+		t := reflect.TypeOf(v)
+		if t.Kind() == reflect.Pointer {
+			if s, ok := remStructs[t.Elem()]; ok {
+				varSMs[i] = s
+			}
+		}
+	}
+	remLock.RUnlock()
+
+	//Pull the uncached StructModels
+	for i, v := range vars {
+		//If the type was cached then nothing to do
+		if varSMs[i].fields != nil {
+			continue
+		}
+
+		//Get type pointed to
+		t := reflect.TypeOf(v)
+		if t.Kind() != reflect.Pointer {
+			errs = append(errs, fmt.Sprintf("Parameter #%d of type “%s” is not a pointer", i, t.String()))
+			continue
+		}
+		t = t.Elem()
+
+		//Pull the StructModel for structs or scalars
+		var err error
+		var sm StructModel
+		if t.Kind() == reflect.Struct && !isScalarStruct(t) {
+			sm, err = createStructModelFromStruct(t)
+		} else {
+			sm, err = createStructModelFromScalar(t)
+		}
+
+		//Store either the successful result or the error
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("Parameter #%d of type “%s” has errors:\n%s", i, t.String(), err.Error()))
+		} else {
+			varSMs[i] = sm
+		}
+	}
+
+	//Return errors
+	if len(errs) != 0 {
+		return StructModel{}, nil, errors.New(strings.Join(errs, "\n\n"))
+	}
+
+	//Create an array that holds all the pointers
+	outArr := make([]upt, len(vars))
+	for i, v := range vars {
+		outArr[i] = upt(interface2Pointer(v))
+	}
+
+	//Initialize newSM (get number of pointers and fields)
+	var newSM StructModel
+	{
+		numPointers, numFields := 0, 0
+		for _, sm := range varSMs {
+			numPointers += len(sm.pointers) + 1
+			numFields += len(sm.fields)
+		}
+		newSM.fields = make([]structField, numFields)
+		newSM.pointers = make([]structPointer, numPointers)
+	}
+
+	//Create a StructModel for return
+	pointerSize := unsafe.Sizeof((*int)(nil))
+	curPointerIndex, curFieldIndex := 0, 0
+	for smIndex, sm := range varSMs {
+		//Store the variable as a pointer
+		newSM.pointers[curPointerIndex] = structPointer{0, pointerSize * uintptr(smIndex), "Param#" + strconv.Itoa(smIndex)}
+		curPointerIndex++
+
+		//Copy over its members
+		for fieldIndex, field := range sm.fields {
+			tempField := field
+			tempField.pointerIndex += curPointerIndex
+			//While I could update the name field here, to include the parameter number, I feel that is a waste of processing
+			newSM.fields[curFieldIndex+fieldIndex] = tempField
+		}
+		curFieldIndex += len(sm.fields)
+
+		//Copy over its pointers
+		for pointerIndex, pointer := range sm.pointers {
+			tempPointer := pointer
+			tempPointer.parentIndex += curPointerIndex
+			newSM.pointers[curPointerIndex+pointerIndex] = tempPointer
+		}
+		curPointerIndex += len(sm.pointers)
+	}
+
+	return newSM, outArr, nil
+}
+
+func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
+	convFunc := scalarToConversionFunc(t)
+	if convFunc == nil {
+		return StructModel{}, errors.New("Invalid scalar type")
+	}
+
+	sm := StructModel{
+		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), false}},
+		nil, t,
+	}
+
+	//Cache the structure model
+	remLock.Lock()
+	remStructs[t] = sm
+	remLock.Unlock()
+
+	return sm, nil
 }
 
 //-------------------------------------Misc-------------------------------------

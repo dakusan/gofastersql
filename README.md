@@ -74,6 +74,12 @@ var mooVar moo
 if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, null"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
 	panic(err)
 }
+
+//This is equivalent to the above statement but takes a lot more processing than ScanRow() and may be much slower
+if err := gofastersql.ScanRowMulti(db.QueryRow("SELECT 2, 4, 8, null"), &fooVar, &mooVar); err != nil {
+	panic(err)
+}
+
 ```
 Result:
 ```go
@@ -83,3 +89,4 @@ Result:
 
 > [!warning]
 > If you are scanning a lot of rows it is recommended to use a `RowReader` instead of `gofastersql.ScanRow` as it bypasses a mutex read lock and a few allocations.
+> In some cases `gofastersql.ScanRow` may even be slower than the native `sql.Row.Scan()` method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in `gofastersql.ScanRow` and especially in `gofastersql.ScanRowMulti`.

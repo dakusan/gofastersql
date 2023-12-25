@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	SQLConnectString   = "USERNAME@tcp(HOSTNAME:PORT)/DBNAME"
+	SQLConnectString           = "USERNAME@tcp(HOSTNAME:PORT)/DBNAME"
 	NumBenchmarkScanRowsPasses = 100_000
 )
 
@@ -108,6 +108,35 @@ func setupSQLConnect() (*sql.Tx, error) {
 	}
 }
 
+func getTestQueryString(noTimeTesting bool) string {
+	//Select values for all the columns
+	//Return #1 will have max-values for sets #1,#2 and min-value for set #4
+	//Return #2 will have sets #1,#2,#4 overflow (though some of the 64 bit ones cant overflow in SQL for testing)
+	return `
+SELECT
+	/*P1 and TestStruct2*/
+	CONCAT('P1-', i),
+	2+i, (1<<8)-1+i, (1<<16)-1+i, (1<<32)-1+i, 0xFFFFFFFFFFFFFFFF+0, /*Set 1*/
+	2+i, (1<<7)-1+i, (1<<15)-1+i, (1<<31)-1+i, (1<<63)-1+i,          /*Set 2*/
+	1.1+i, 5.5+i, CONCAT('str-', i), CONCAT('ba-', i), CONCAT('rb-', i), i,
+
+	/*P2 and TS3*/
+	5+i,
+	20+i, (1<<8)-2+i, (1<<16)-2+i, (1<<32)-2+i, 0xFFFFFFFFFFFFFFFF+0,/*Set 3*/
+	20+i, CAST(1<<7 AS INT)*-1-i, CAST(1<<15 AS INT)*-1-i, CAST(1<<31 AS INT)*-1-i, CAST((1<<62)-1 AS SIGNED)*-2-2-0, /*Set 4*/
+	11.11+i, 12.12+i, CONCAT('strP-', i), CONCAT('baP-', i), CONCAT('rbP-', i), i,
+
+	/*TS9*/
+	CONCAT('P3-', i), ` + cond(noTimeTesting, `null, null`, `CAST('2001-02-03 05:06:07.21' AS DATETIME(3)), UNIX_TIMESTAMP('2005-08-09 15:16:17.62')`) + `
+FROM goTest
+	`
+}
+
+func getExpectedTestQueryResult() string {
+	//goland:noinspection SpellCheckingInspection
+	return `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA==","T1":"2001-02-03T05:06:07.21Z","T2":"2005-08-09T15:16:17.62Z"}}`
+}
+
 func setupTestQuery(
 	usePreparedQuery bool, //If true a prepared statement is used instead of a normal query (used for benchmarking)
 	noTimeTesting bool, //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
@@ -127,32 +156,10 @@ func setupTestQuery(
 		return tx, nil, err
 	}
 
-	//Select values for all the columns
-	//Return #1 will have max-values for sets #1,#2 and min-value for set #4
-	//Return #2 will have sets #1,#2,#4 overflow (though some of the 64 bit ones cant overflow in SQL for testing)
-	queryStr := `
-SELECT
-	/*P1 and TestStruct2*/
-	CONCAT('P1-', i),
-	2+i, (1<<8)-1+i, (1<<16)-1+i, (1<<32)-1+i, 0xFFFFFFFFFFFFFFFF+0, /*Set 1*/
-	2+i, (1<<7)-1+i, (1<<15)-1+i, (1<<31)-1+i, (1<<63)-1+i,          /*Set 2*/
-	1.1+i, 5.5+i, CONCAT('str-', i), CONCAT('ba-', i), CONCAT('rb-', i), i,
-
-	/*P2 and TS3*/
-	5+i,
-	20+i, (1<<8)-2+i, (1<<16)-2+i, (1<<32)-2+i, 0xFFFFFFFFFFFFFFFF+0,/*Set 3*/
-	20+i, CAST(1<<7 AS INT)*-1-i, CAST(1<<15 AS INT)*-1-i, CAST(1<<31 AS INT)*-1-i, CAST((1<<62)-1 AS SIGNED)*-2-2-0, /*Set 4*/
-	11.11+i, 12.12+i, CONCAT('strP-', i), CONCAT('baP-', i), CONCAT('rbP-', i), i,
-
-	/*TS9*/
-	CONCAT('P3-', i), ` + cond(noTimeTesting, `null, null`, `CAST('2001-02-03 05:06:07.21' AS DATETIME(3)), UNIX_TIMESTAMP('2005-08-09 15:16:17.62')`) + `
-FROM goTest
-	`
-
 	if !usePreparedQuery {
-		rows, err := tx.Query(queryStr)
+		rows, err := tx.Query(getTestQueryString(noTimeTesting))
 		return tx, rows, err
-	} else if stmt, err := tx.Prepare(queryStr); err != nil {
+	} else if stmt, err := tx.Prepare(getTestQueryString(noTimeTesting)); err != nil {
 		return tx, nil, err
 	} else {
 		rows, err := stmt.Query()
@@ -242,8 +249,7 @@ func TestAllTypes(t *testing.T) {
 			t.Fatal(err)
 		} else if str, err := json.Marshal(ts1); err != nil {
 			t.Fatal(err)
-		} else if //goland:noinspection SpellCheckingInspection
-		string(str) != `{"P1":"P1-0","U":2,"U8":255,"U16":65535,"U32":4294967295,"U64":18446744073709551615,"I":2,"I8":127,"I16":32767,"I32":2147483647,"I64":9223372036854775807,"F32":1.1,"F64":5.5,"S":"str-0","BA":"YmEtMA==","RB":"cmItMA==","B":false,"P2":5,"TS3":{"TS4":{"U":20,"U8":254,"U16":65534,"U32":4294967294,"U64":18446744073709551615},"I":20,"I8":-128,"I16":-32768,"I32":-2147483648,"I64":-9223372036854775808,"F32":11.11,"F64":12.12,"TS6":{"TS7":{"S":"strP-0"},"BA":"YmFQLTA="},"RB":"cmJQLTA=","B":false},"TS9":{"P3":"UDMtMA==","T1":"2001-02-03T05:06:07.21Z","T2":"2005-08-09T15:16:17.62Z"}}` {
+		} else if string(str) != getExpectedTestQueryResult() {
 			t.Fatal("Structure json marshal did not match: " + string(str))
 		}
 	})
@@ -315,6 +321,27 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 			t.Fatal(err)
 		} else if st.a != 1 || st.b != 3 {
 			t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
+		}
+	})
+
+	t.Run("ReadRowMulti 1 item", func(t *testing.T) {
+		var a int
+		if err := ScanRowMulti(tx.QueryRow(`SELECT 6`), &a); err != nil {
+			t.Fatal(err)
+		} else if a != 6 {
+			t.Fatal(fmt.Sprintf("%d!=%d", a, 6))
+		}
+	})
+
+	//Test ReadRowMulti
+	t.Run("ReadRowMulti", func(t *testing.T) {
+		ts1 := setupTestStruct()
+		if err := ScanRowMulti(tx.QueryRow(getTestQueryString(false)), &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9); err != nil {
+			t.Fatal(err)
+		} else if str, err := json.Marshal(ts1); err != nil {
+			t.Fatal(err)
+		} else if string(str) != getExpectedTestQueryResult() {
+			t.Fatal("Structure json marshal for ReadRowMulti did not match: " + string(str))
 		}
 	})
 }
@@ -447,53 +474,57 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 		ts1 := setupTestStruct()
 		var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
 		for n := 0; n < NumBenchmarkScanRowsPasses; n++ {
-			if err := rows.Scan(
-				&ts1.P1,
-				&ts1.U,
-				&ts1.U8,
-				&ts1.U16,
-				&ts1.U32,
-				&ts1.U64,
-				&ts1.I,
-				&ts1.I8,
-				&ts1.I16,
-				&ts1.I32,
-				&ts1.I64,
-				&ts1.F32,
-				ts1.F64,
-				&ts1.S,
-				&ts1.BA,
-				&ts1.RB,
-				&ts1.B,
-				&ts1.P2,
-				ts1.TS3.TS4.U,
-				ts1.TS3.TS4.U8,
-				ts1.TS3.TS4.U16,
-				ts1.TS3.TS4.U32,
-				ts1.TS3.TS4.U64,
-				ts1.TS3.TestStruct5.I,
-				ts1.TS3.TestStruct5.I8,
-				ts1.TS3.TestStruct5.I16,
-				ts1.TS3.TestStruct5.I32,
-				ts1.TS3.TestStruct5.I64,
-				ts1.TS3.F32,
-				&ts1.TS3.F64,
-				ts1.TS3.TS6.TS7.S,
-				ts1.TS3.TS6.BA,
-				ts1.TS3.RB,
-				ts1.TS3.B,
-				&ts1.TS9.P3,
-				&timeBuff1,
-				&timeBuff2,
-			); err != nil {
+			if err := rows.Scan(getPointersForTestStruct(&ts1, &timeBuff1, &timeBuff2)...); err != nil {
 				b.Fatal(err)
 			}
 		}
 	}
 }
 
+func getPointersForTestStruct(ts1 *testStruct1, timeBuff1, timeBuff2 *[]byte) []any {
+	return []any{
+		&ts1.P1,
+		&ts1.U,
+		&ts1.U8,
+		&ts1.U16,
+		&ts1.U32,
+		&ts1.U64,
+		&ts1.I,
+		&ts1.I8,
+		&ts1.I16,
+		&ts1.I32,
+		&ts1.I64,
+		&ts1.F32,
+		ts1.F64,
+		&ts1.S,
+		&ts1.BA,
+		&ts1.RB,
+		&ts1.B,
+		&ts1.P2,
+		ts1.TS3.TS4.U,
+		ts1.TS3.TS4.U8,
+		ts1.TS3.TS4.U16,
+		ts1.TS3.TS4.U32,
+		ts1.TS3.TS4.U64,
+		ts1.TS3.TestStruct5.I,
+		ts1.TS3.TestStruct5.I8,
+		ts1.TS3.TestStruct5.I16,
+		ts1.TS3.TestStruct5.I32,
+		ts1.TS3.TestStruct5.I64,
+		ts1.TS3.F32,
+		&ts1.TS3.F64,
+		ts1.TS3.TS6.TS7.S,
+		ts1.TS3.TS6.BA,
+		ts1.TS3.RB,
+		ts1.TS3.B,
+		&ts1.TS9.P3,
+		&timeBuff1,
+		&timeBuff2,
+	}
+}
+
 //-------------------------------Benchmark ScanRow------------------------------
-//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing
+//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing. It is possible to get accurate results though by modifying the sql.go
 
 func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
 	//Connect to the database and create a transaction
@@ -530,6 +561,63 @@ func BenchmarkRowReader_ScanRow_OneItem_Native(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		var ts1 struct{ i1 int }
 		if err := tx.QueryRow(`SELECT 5`).Scan(&ts1.i1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+//----------------------------Benchmark ScanRowMulti----------------------------
+//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing. It is possible to get accurate results though by modifying the sql.go
+
+func BenchmarkRowReader_ScanRowMulti_Faster(b *testing.B) {
+	//Init test data
+	var tx *sql.Tx
+	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
+		b.Fatal(err)
+	} else {
+		_ = _rows.Close()
+		tx = _tx
+		defer rollbackTransactionAndRows(tx, nil)
+	}
+	queryStr := getTestQueryString(true)
+
+	//Run the benchmark tests
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ts1 := setupTestStruct()
+		if err := ScanRowMulti(tx.QueryRow(queryStr), &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkRowReader_ScanRowMulti_Native(b *testing.B) {
+	//Init test data
+	var tx *sql.Tx
+	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
+		b.Fatal(err)
+	} else {
+		_ = _rows.Close()
+		tx = _tx
+		defer rollbackTransactionAndRows(tx, nil)
+	}
+	queryStr := getTestQueryString(true)
+
+	//Run the benchmark tests
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ts1 := setupTestStruct()
+		var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+		pointers := getPointersForTestStruct(&ts1, &timeBuff1, &timeBuff2)
+
+		//Change RawBytes to []byte since Row.Scan() does not support RawBytes
+		for _, n := range []int{15, 32} {
+			pointers[n] = (*[]byte)(pointers[n].(*sql.RawBytes))
+		}
+
+		if err := tx.QueryRow(queryStr).Scan(pointers...); err != nil {
 			b.Fatal(err)
 		}
 	}
