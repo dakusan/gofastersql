@@ -22,6 +22,8 @@ GoFasterSQL supports the following member types in structures, including typedef
   - `time.Time` *(also accepts unix timestamps)*
   - `struct` *(struct pointers add a very tiny bit of extra overhead)*
 
+GoFasterSQL is available under the same style of BSD license as the Go language, which can be found in the LICENSE file.
+
 # Example Usage
 ## Example #1
 ```go
@@ -90,3 +92,10 @@ Result:
 > [!warning]
 > If you are scanning a lot of rows it is recommended to use a `RowReader` instead of `gofastersql.ScanRow` as it bypasses a mutex read lock and a few allocations.
 > In some cases `gofastersql.ScanRow` may even be slower than the native `sql.Row.Scan()` method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in `gofastersql.ScanRow` and especially in `gofastersql.ScanRowMulti`.
+
+# Installation
+GoFasterSQL is available using the standard go get command.
+
+Install by running:
+
+go get github.com/dakusan/gofastersql
