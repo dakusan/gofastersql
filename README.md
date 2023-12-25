@@ -3,20 +3,17 @@
 
 ![GoFasterSQL Logo](logo.jpg)
 
+GoFasterSQL is a tool designed to enhance the efficiency and simplicity of scanning SQL rows into structures.
 
-GoFasterSQL is a tool designed to significantly enhance the efficiency and simplicity of scanning SQL rows into structures.
+The flaw in the native library scanning process is its repetitive and time-consuming type determination for each row scan. It must match each field’s type with its native counterpart before converting the data string (byte array). Furthermore, the requirement to specify each individual field for scanning is tedious.
 
-Unlike the native MySQL package in GoLang, which is often slow and unwieldy, GoFasterSQL streamlines the process with remarkable speed and ease.
+GoFasterSQL instead precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods, a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
 
-A critical flaw in the native scanning process is its repetitive type determination for each row scan. It laboriously matches each field's type with its native counterpart before converting the data string (byte array), a process that is both time-consuming and cumbersome. Furthermore, the requirement to specify each field for scanning seems unnecessarily tedious.
-
-In contrast, GoFasterSQL precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods, a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
-
-The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift and efficient reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
+The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
 
 `RowReader`s, created via `StructModel.CreateReader()`, are not concurrency safe and can only be used in one goroutine at a time.
 
-GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package). This flexibility ensures broad compatibility and ease of integration into diverse projects.
+GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package).
   - `string`, `[]byte`, `sql.RawBytes`
   - `bool`
   - `int`, `int8`, `int16`, `int32`, `int64`
