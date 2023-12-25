@@ -82,5 +82,4 @@ Result:
 ```
 
 > [!warning]
-> If you are scanning a lot of rows it is recommended to use a `RowReader` instead of `gofastersql.ScanRow` as it bypasses a mutex read lock, a lot of reflection manipulation, and a number of allocations.
-In some rare cases `gofastersql.ScanRow` may even be slower than the native `sql.Row.Scan()` method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in `gofastersql.ScanRow`.
+> If you are scanning a lot of rows it is recommended to use a `RowReader` instead of `gofastersql.ScanRow` as it bypasses a mutex read lock and a few allocations.

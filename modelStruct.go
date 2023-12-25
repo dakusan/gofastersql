@@ -55,9 +55,14 @@ var nullTypeStructs = map[reflect.Type]converterFunc{
 var remLock sync.RWMutex
 
 // ModelStruct extracts the model of a structure for processing as a RowReader.
+// This is just a wrapper for ModelStructType.
 func ModelStruct(s any) (StructModel, error) {
+	return ModelStructType(reflect.TypeOf(s))
+}
+
+// ModelStructType extracts the model of a structure for processing as a RowReader.
+func ModelStructType(t reflect.Type) (StructModel, error) {
 	//Throw error if a structure is not passed
-	t := reflect.TypeOf(s)
 	if t.Kind() != reflect.Struct {
 		return StructModel{}, fmt.Errorf("Not a %s", reflect.Struct.String())
 	}

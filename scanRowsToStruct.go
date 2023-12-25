@@ -145,26 +145,22 @@ func (r RowReader) ScanRow(row *sql.Row, outPointer any) error {
 }
 
 /*
-ScanRow does an sql.Row.Scan into the output variable. Output must be a pointer.
+ScanRow does an sql.Row.Scan into the output variable.
 
 This is essentially the same as:
 
 	ModelStruct(*output).CreateReader().ScanRow(row, output)
 
-If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock, a lot of reflection manipulation, and a number of allocations.
-In some rare cases this function may even be slower than the native sql.Row.Scan() method.
+If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
 */
-func ScanRow(row *sql.Row, output any) error {
-	//Get the StructModel
-	var sm StructModel
-	if reflect.TypeOf(output).Kind() != reflect.Pointer {
-		return errors.New("Output must be a pointer")
-	} else if _sm, err := ModelStruct(reflect.ValueOf(output).Elem().Interface()); err != nil {
+func ScanRow[T any](row *sql.Row, output *T) error {
+	if sm, err := ModelStructType(reflect.TypeOf(output).Elem()); err != nil {
 		return err
 	} else {
-		sm = _sm
+		return scanRowReal(sm, row, output)
 	}
-
+}
+func scanRowReal(sm StructModel, row *sql.Row, output any) error {
 	//Create the RowReader
 	rb := make([]sql.RawBytes, len(sm.fields))
 	rba := make([]any, len(sm.fields))

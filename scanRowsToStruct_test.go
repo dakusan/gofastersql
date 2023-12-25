@@ -480,3 +480,45 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 		}
 	}
 }
+
+//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing
+func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
+	//Connect to the database and create a transaction
+	var tx *sql.Tx
+	if _tx, err := setupSQLConnect(); err != nil {
+		b.Fatal(err)
+	} else {
+		tx = _tx
+	}
+	defer rollbackTransactionAndRows(tx, nil)
+
+	//Run the benchmark tests
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ts1 struct{ i1 int }
+		if err := ScanRow(tx.QueryRow(`SELECT 5`), &ts1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing
+func BenchmarkRowReader_ScanRow_OneItem_Native(b *testing.B) {
+	//Connect to the database and create a transaction
+	var tx *sql.Tx
+	if _tx, err := setupSQLConnect(); err != nil {
+		b.Fatal(err)
+	} else {
+		tx = _tx
+	}
+	defer rollbackTransactionAndRows(tx, nil)
+
+	//Run the benchmark tests
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var ts1 struct{ i1 int }
+		if err := tx.QueryRow(`SELECT 5`).Scan(&ts1.i1); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
