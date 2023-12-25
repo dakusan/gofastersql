@@ -13,8 +13,10 @@ import (
 
 const (
 	SQLConnectString   = "USERNAME@tcp(HOSTNAME:PORT)/DBNAME"
-	NumBenchmarkPasses = 100_000
+	NumBenchmarkScanRowsPasses = 100_000
 )
+
+//-----------Test structures containing all (non-null) readable types-----------
 
 type testStruct1 struct { //0@0
 	P1          string       //0
@@ -75,10 +77,12 @@ type TestStruct8 struct { //2@8
 	BA *[]byte //8
 }
 type TestStruct9 struct { //4@0
-	P3 []byte //0
-	T1 time.Time
-	T2 *time.Time
+	P3 []byte     //0
+	T1 time.Time  //24
+	T2 *time.Time //48
 }
+
+//-----------------Database and struct setups for test functions----------------
 
 var sqlConn *sql.DB
 
@@ -106,7 +110,7 @@ func setupSQLConnect() (*sql.Tx, error) {
 
 func setupTestQuery(
 	usePreparedQuery bool, //If true a prepared statement is used instead of a normal query (used for benchmarking)
-	noTimeTesting bool,    //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
+	noTimeTesting bool, //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
 ) (*sql.Tx, *sql.Rows, error) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
@@ -206,6 +210,8 @@ func rollbackTransactionAndRows(tx *sql.Tx, rows *sql.Rows) {
 	}
 }
 
+//--------------------------------Test functions--------------------------------
+
 func TestAllTypes(t *testing.T) {
 	//Init test data
 	var tx *sql.Tx
@@ -298,6 +304,9 @@ func TestAllTypes(t *testing.T) {
 	})
 	_ = rows.Close()
 
+	testReadRow(t, tx)
+}
+func testReadRow(t *testing.T, tx *sql.Tx) {
 	//Test ReadRow
 	t.Run("ReadRow", func(t *testing.T) {
 		type smallTest struct{ a, b int }
@@ -382,6 +391,8 @@ func TestNulls(t *testing.T) {
 	})
 }
 
+//------------------------------Benchmark ScanRows------------------------------
+
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
@@ -404,7 +415,7 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 			rr = sm.CreateReader()
 		}
 
-		for n := 0; n < NumBenchmarkPasses; n++ {
+		for n := 0; n < NumBenchmarkScanRowsPasses; n++ {
 			if err := rr.ScanRows(rows, &ts1); err != nil {
 				b.Fatal(err)
 			}
@@ -435,7 +446,7 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 	for i := 0; i < b.N; i++ {
 		ts1 := setupTestStruct()
 		var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
-		for n := 0; n < NumBenchmarkPasses; n++ {
+		for n := 0; n < NumBenchmarkScanRowsPasses; n++ {
 			if err := rows.Scan(
 				&ts1.P1,
 				&ts1.U,
@@ -481,7 +492,9 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 	}
 }
 
+//-------------------------------Benchmark ScanRow------------------------------
 //Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing
+
 func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
@@ -502,7 +515,6 @@ func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
 	}
 }
 
-//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing
 func BenchmarkRowReader_ScanRow_OneItem_Native(b *testing.B) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
