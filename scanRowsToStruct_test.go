@@ -105,7 +105,8 @@ func setupSQLConnect() (*sql.Tx, error) {
 }
 
 func setupTestQuery(
-	noTimeTesting bool, //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
+	usePreparedQuery bool, //If true a prepared statement is used instead of a normal query (used for benchmarking)
+	noTimeTesting bool,    //time.Time testing is only done for the test runs and not the bench runs since MySQL native lib support seems to not work
 ) (*sql.Tx, *sql.Rows, error) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
@@ -117,17 +118,15 @@ func setupTestQuery(
 
 	//Create a temporary table and fill it with values 0, 1, 0
 	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i int) ENGINE=MEMORY`); err != nil {
-		rollbackTransactionAndRows(tx, nil)
-		return nil, nil, err
+		return tx, nil, err
 	} else if _, err := tx.Exec(`INSERT INTO goTest VALUES (0), (1), (0);`); err != nil {
-		rollbackTransactionAndRows(tx, nil)
-		return nil, nil, err
+		return tx, nil, err
 	}
 
 	//Select values for all the columns
 	//Return #1 will have max-values for sets #1,#2 and min-value for set #4
 	//Return #2 will have sets #1,#2,#4 overflow (though some of the 64 bit ones cant overflow in SQL for testing)
-	rows, err := tx.Query(`
+	queryStr := `
 SELECT
 	/*P1 and TestStruct2*/
 	CONCAT('P1-', i),
@@ -144,9 +143,17 @@ SELECT
 	/*TS9*/
 	CONCAT('P3-', i), ` + cond(noTimeTesting, `null, null`, `CAST('2001-02-03 05:06:07.21' AS DATETIME(3)), UNIX_TIMESTAMP('2005-08-09 15:16:17.62')`) + `
 FROM goTest
-	`)
+	`
 
-	return tx, rows, err
+	if !usePreparedQuery {
+		rows, err := tx.Query(queryStr)
+		return tx, rows, err
+	} else if stmt, err := tx.Prepare(queryStr); err != nil {
+		return tx, nil, err
+	} else {
+		rows, err := stmt.Query()
+		return tx, rows, err
+	}
 }
 
 func setupTestStruct() testStruct1 {
@@ -193,15 +200,18 @@ func rollbackTransactionAndRows(tx *sql.Tx, rows *sql.Rows) {
 	if rows != nil {
 		_ = rows.Close()
 	}
-	_, _ = tx.Exec(`DROP TEMPORARY TABLE goTest`)
-	_ = tx.Rollback()
+	if tx != nil {
+		_, _ = tx.Exec(`DROP TEMPORARY TABLE goTest`)
+		_ = tx.Rollback()
+	}
 }
 
 func TestAllTypes(t *testing.T) {
 	//Init test data
 	var tx *sql.Tx
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(false); err != nil {
+	if _tx, _rows, err := setupTestQuery(false, false); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
 		t.Fatal(err)
 	} else {
 		tx, rows = _tx, _rows
@@ -375,7 +385,8 @@ func TestNulls(t *testing.T) {
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(true); err != nil {
+	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
 		b.Fatal(err)
 	} else {
 		rows = _rows
@@ -402,9 +413,16 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 }
 
 func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
+	rowReaderScanRowsNative(b, false)
+}
+func BenchmarkRowReader_ScanRows_NativePrepared(b *testing.B) {
+	rowReaderScanRowsNative(b, true)
+}
+func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 	//Init test data
 	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(true); err != nil {
+	if _tx, _rows, err := setupTestQuery(usePreparedQuery, true); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
 		b.Fatal(err)
 	} else {
 		rows = _rows
