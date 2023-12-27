@@ -6,14 +6,26 @@ import (
 	"fmt"
 	"github.com/dakusan/gofastersql/nulltypes"
 	_ "github.com/go-sql-driver/mysql"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 )
 
+//goland:noinspection ALL
 const (
 	SQLConnectString           = "USERNAME@tcp(HOSTNAME:PORT)/DBNAME"
 	NumBenchmarkScanRowsPasses = 100_000
+
+	/*
+		For the non-RowReader tests (_OneItem_ and _MultiItem_), Row.Scan() immediately clears its contents upon reading, so we have to run an SQL query for every test iteration, which basically invalidates the benchmark timing.
+		However, if you set the following constant to true and make the following temporary modifications to Go/src/database/sql/sql.go function (*Row).Scan() you can get proper test timing results.
+		  - Comment the following line: defer r.rows.Close()
+		  - Nest “if !r.rows.Next() {” within an if statement “if r.rows.lastcols == nil {”
+		  - Comment “return r.rows.Close()” and replace it with “return nil”
+		  - Add the following outside the function: func (r *Row) Close() { r.rows.Close() }
+	*/
+	UseScanRowModified = false
 )
 
 //-----------Test structures containing all (non-null) readable types-----------
@@ -524,9 +536,8 @@ func getPointersForTestStruct(ts1 *testStruct1, timeBuff1, timeBuff2 *[]byte) []
 }
 
 //-------------------------------Benchmark ScanRow------------------------------
-//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing. It is possible to get accurate results though by modifying the sql.go
 
-func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
+func Benchmark_OneItem_ScanRow_Faster(b *testing.B) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
 	if _tx, err := setupSQLConnect(); err != nil {
@@ -536,17 +547,26 @@ func BenchmarkRowReader_ScanRow_OneItem_Faster(b *testing.B) {
 	}
 	defer rollbackTransactionAndRows(tx, nil)
 
+	//Handle UseScanRowModified
+	var row *sql.Row
+	numInternalIterations, closeRowFunc := handleUseScanRowModified()
+	defer func() { closeRowFunc(row) }()
+
 	//Run the benchmark tests
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var ts1 struct{ i1 int }
-		if err := ScanRow(tx.QueryRow(`SELECT 5`), &ts1); err != nil {
-			b.Fatal(err)
+		row = tx.QueryRow(`SELECT 5`)
+		for n := 0; n < numInternalIterations; n++ {
+			if err := ScanRow(row, &ts1); err != nil {
+				b.Fatal(err)
+			}
 		}
+		closeRowFunc(row)
 	}
 }
 
-func BenchmarkRowReader_ScanRow_OneItem_Native(b *testing.B) {
+func Benchmark_OneItem_Native(b *testing.B) {
 	//Connect to the database and create a transaction
 	var tx *sql.Tx
 	if _tx, err := setupSQLConnect(); err != nil {
@@ -556,20 +576,50 @@ func BenchmarkRowReader_ScanRow_OneItem_Native(b *testing.B) {
 	}
 	defer rollbackTransactionAndRows(tx, nil)
 
+	//Handle UseScanRowModified
+	var row *sql.Row
+	numInternalIterations, closeRowFunc := handleUseScanRowModified()
+	defer func() { closeRowFunc(row) }()
+
 	//Run the benchmark tests
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		var ts1 struct{ i1 int }
-		if err := tx.QueryRow(`SELECT 5`).Scan(&ts1.i1); err != nil {
-			b.Fatal(err)
+		row = tx.QueryRow(`SELECT 5`)
+		for n := 0; n < numInternalIterations; n++ {
+			if err := row.Scan(&ts1.i1); err != nil {
+				b.Fatal(err)
+			}
 		}
+		closeRowFunc(row)
+	}
+}
+
+//goland:noinspection GoBoolExpressions
+func handleUseScanRowModified() (int, func(*sql.Row)) {
+	//When not UseScanRowModified then only 1 test is ran per iteration and rows do not need to be closed
+	if !UseScanRowModified {
+		return 1, func(*sql.Row) {}
+	}
+
+	//Get the (*sql.Row).Close() function
+	var closeFunc func(*sql.Row)
+	if _closeFuncVal, found := reflect.TypeOf(&sql.Row{}).MethodByName("Close"); !found {
+		panic("sql.Row.Close() not found")
+	} else if _closeFunc, ok := _closeFuncVal.Func.Interface().(func(*sql.Row)); !ok {
+		panic("sql.Row.Close(*sql.Row) signature not correct")
+	} else {
+		closeFunc = _closeFunc
+	}
+
+	return NumBenchmarkScanRowsPasses, func(r *sql.Row) {
+		closeFunc(r)
 	}
 }
 
 //----------------------------Benchmark ScanRowMulti----------------------------
-//Unfortunately since Row.Scan() immediately clears its contents upon reading we have to run an SQL query for every test iteration, which basically invalidates the test timing. It is possible to get accurate results though by modifying the sql.go
 
-func BenchmarkRowReader_ScanRowMulti_Faster(b *testing.B) {
+func Benchmark_MultiItem_ScanRow_Faster(b *testing.B) {
 	//Init test data
 	var tx *sql.Tx
 	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
@@ -581,18 +631,27 @@ func BenchmarkRowReader_ScanRowMulti_Faster(b *testing.B) {
 		defer rollbackTransactionAndRows(tx, nil)
 	}
 	queryStr := getTestQueryString(true)
+
+	//Handle UseScanRowModified
+	var row *sql.Row
+	numInternalIterations, closeRowFunc := handleUseScanRowModified()
+	defer func() { closeRowFunc(row) }()
 
 	//Run the benchmark tests
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		ts1 := setupTestStruct()
-		if err := ScanRowMulti(tx.QueryRow(queryStr), &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9); err != nil {
-			b.Fatal(err)
+		row = tx.QueryRow(queryStr)
+		for n := 0; n < numInternalIterations; n++ {
+			if err := ScanRow(row, &ts1); err != nil {
+				b.Fatal(err)
+			}
 		}
+		closeRowFunc(row)
 	}
 }
 
-func BenchmarkRowReader_ScanRowMulti_Native(b *testing.B) {
+func Benchmark_MultiItem_ScanRowMulti_Faster(b *testing.B) {
 	//Init test data
 	var tx *sql.Tx
 	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
@@ -604,6 +663,43 @@ func BenchmarkRowReader_ScanRowMulti_Native(b *testing.B) {
 		defer rollbackTransactionAndRows(tx, nil)
 	}
 	queryStr := getTestQueryString(true)
+
+	//Handle UseScanRowModified
+	var row *sql.Row
+	numInternalIterations, closeRowFunc := handleUseScanRowModified()
+	defer func() { closeRowFunc(row) }()
+
+	//Run the benchmark tests
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ts1 := setupTestStruct()
+		row = tx.QueryRow(queryStr)
+		for n := 0; n < numInternalIterations; n++ {
+			if err := ScanRowMulti(row, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9); err != nil {
+				b.Fatal(err)
+			}
+		}
+		closeRowFunc(row)
+	}
+}
+
+func Benchmark_MultiItem_Native(b *testing.B) {
+	//Init test data
+	var tx *sql.Tx
+	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
+		rollbackTransactionAndRows(_tx, _rows)
+		b.Fatal(err)
+	} else {
+		_ = _rows.Close()
+		tx = _tx
+		defer rollbackTransactionAndRows(tx, nil)
+	}
+	queryStr := getTestQueryString(true)
+
+	//Handle UseScanRowModified
+	var row *sql.Row
+	numInternalIterations, closeRowFunc := handleUseScanRowModified()
+	defer func() { closeRowFunc(row) }()
 
 	//Run the benchmark tests
 	b.ResetTimer()
@@ -617,8 +713,12 @@ func BenchmarkRowReader_ScanRowMulti_Native(b *testing.B) {
 			pointers[n] = (*[]byte)(pointers[n].(*sql.RawBytes))
 		}
 
-		if err := tx.QueryRow(queryStr).Scan(pointers...); err != nil {
-			b.Fatal(err)
+		row = tx.QueryRow(queryStr)
+		for n := 0; n < numInternalIterations; n++ {
+			if err := row.Scan(pointers...); err != nil {
+				b.Fatal(err)
+			}
 		}
+		closeRowFunc(row)
 	}
 }
