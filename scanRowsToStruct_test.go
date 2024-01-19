@@ -245,7 +245,7 @@ func TestAllTypes(t *testing.T) {
 	ts1 := setupTestStruct()
 
 	//Prepare structures for the tests
-	var rr RowReader
+	var rr *RowReader
 	var sm StructModel
 	if _sm, err := ModelStruct(ts1); err != nil {
 		t.Fatal(err)
@@ -447,7 +447,7 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 
 	//Run the benchmark tests
 	for i := 0; i < b.N; i++ {
-		var rr RowReader
+		var rr *RowReader
 		ts1 := setupTestStruct()
 		{
 			sm, _ := ModelStruct(ts1)

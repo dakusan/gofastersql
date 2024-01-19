@@ -88,46 +88,46 @@ type RowReader struct {
 }
 
 // CreateReader creates a RowReader from the StructModel
-func (sm StructModel) CreateReader() RowReader {
+func (sm StructModel) CreateReader() *RowReader {
 	rb := make([]sql.RawBytes, len(sm.fields))
 	rba := make([]any, len(sm.fields))
 	for i := range rb {
 		rba[i] = &rb[i]
 	}
 
-	return RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
+	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
 }
 
 // ScanRows does an sql.Rows.Scan into the outPointer structure
-func (r RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
+func (rr *RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
 	//Make sure the outPointer type matches
-	if err := r.checkType(outPointer); err != nil {
+	if err := rr.checkType(outPointer); err != nil {
 		return err
 	}
 
-	if err := rows.Scan(r.rawBytesAny...); err != nil {
+	if err := rows.Scan(rr.rawBytesAny...); err != nil {
 		return err
 	}
-	return r.convert(outPointer)
+	return rr.convert(outPointer)
 }
 
 // ScanRow does an sql.Row.Scan into the outPointer structure
-func (r RowReader) ScanRow(row *sql.Row, outPointer any) error {
+func (rr *RowReader) ScanRow(row *sql.Row, outPointer any) error {
 	//Make sure the outPointer type matches
-	if err := r.checkType(outPointer); err != nil {
+	if err := rr.checkType(outPointer); err != nil {
 		return err
 	}
 
 	//Unfortunately, sql.Row.Scan does not support rawBytes, so we are going to have to recast the any-array to use *[]bytes instead
-	bytesArrAny := make([]any, len(r.rawBytesArr))
-	for i := range r.rawBytesArr {
-		bytesArrAny[i] = (*[]byte)(&r.rawBytesArr[i])
+	bytesArrAny := make([]any, len(rr.rawBytesArr))
+	for i := range rr.rawBytesArr {
+		bytesArrAny[i] = (*[]byte)(&rr.rawBytesArr[i])
 	}
 
 	if err := row.Scan(bytesArrAny...); err != nil {
 		return err
 	}
-	return r.convert(outPointer)
+	return rr.convert(outPointer)
 }
 
 /*
@@ -154,7 +154,7 @@ func scanRowReal(sm StructModel, row *sql.Row, output any) error {
 	for i := range rb {
 		rba[i] = (*[]byte)(&rb[i])
 	}
-	r := RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
+	r := &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
 
 	if err := row.Scan(r.rawBytesAny...); err != nil {
 		return err
@@ -180,18 +180,19 @@ func ScanRowMulti(row *sql.Row, output ...any) error {
 	}
 }
 
-func (r RowReader) checkType(outPointer any) error {
+func (rr *RowReader) checkType(outPointer any) error {
 	//Make sure the outPointer type matches
 	t := reflect.TypeOf(outPointer)
-	if t.Kind() != reflect.Pointer || t.Elem() != r.sm.rType {
-		return fmt.Errorf("outPointer type is incorrect (%s)!=(*%s)", reflect.TypeOf(outPointer).String(), r.sm.rType.String())
+	if t.Kind() != reflect.Pointer || t.Elem() != rr.sm.rType {
+		return fmt.Errorf("outPointer type is incorrect (%s)!=(*%s)", reflect.TypeOf(outPointer).String(), rr.sm.rType.String())
 	}
 	return nil
 }
 
-func (r RowReader) convert(outPointer any) error {
+func (rr *RowReader) convert(outPointer any) error {
 	//Determine pointer indexes
 	var errs []string
+	r := *rr //Store locally as we no longer need extensions at this point
 	r.pointers[0] = interface2Pointer(outPointer)
 	for i, p := range r.sm.pointers {
 		newPtr := unsafe.Pointer(nil)
