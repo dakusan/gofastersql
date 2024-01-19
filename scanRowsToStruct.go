@@ -7,7 +7,9 @@ The flaw in the native library scanning process is its repetitive and time-consu
 
 GoFasterSQL instead precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods, a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
 
-The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
+The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe. The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointer` type aligns with the type specified in `ModelStruct`.
+
+`ModelStruct` flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name.
 
 `RowReader`s, created via `StructModel.CreateReader()`, are not concurrency safe and can only be used in one goroutine at a time.
 
@@ -17,7 +19,7 @@ GoFasterSQL supports the following member types in structures, including typedef
   - int, int8, int16, int32, int64
   - uint, uint8, uint16, uint32, uint64
   - float32, float64
-  - time.Time (also accepts unix timestamps)
+  - time.Time (also accepts unix timestamps ; does not currently accept typedef derivatives)
   - struct (struct pointers add a very tiny bit of extra overhead)
 
 Example Usage:
@@ -64,28 +66,7 @@ is equivalent to:
 
 and is much faster to boot!
 
----
-
-Example 2: (Reading directly into multiple structs)
-
-	type foo struct { bar, baz int }
-	type moo struct { cow, calf nulltypes.NullInt64 }
-	var fooVar foo
-	var mooVar moo
-
-	if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, null"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
-		panic(err)
-	}
-
-	//This is equivalent to the above statement but takes a lot more processing than ScanRow() and may be much slower
-	if err := gofastersql.ScanRowMulti(db.QueryRow("SELECT 2, 4, 8, null"), &fooVar, &mooVar); err != nil {
-		panic(err)
-	}
-
-Result:
-
-	fooVar = {2, 4}
-	mooVar = {8, NULL}
+See README.md for further examples
 */
 package gofastersql
 
@@ -98,7 +79,7 @@ import (
 	"unsafe"
 )
 
-// RowReader is used to scan sql rows into a struct. RowReader is NOT concurrency safe. It should only be used in one goroutine at a time.
+// RowReader is used to scan sql rows into a struct by flattened member index. RowReader is NOT concurrency safe. It should only be used in one goroutine at a time.
 type RowReader struct {
 	sm          StructModel
 	rawBytesArr []sql.RawBytes

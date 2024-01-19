@@ -16,7 +16,7 @@ func interface2Pointer(v any) unsafe.Pointer {
 	return (*(*struct{ _, Data unsafe.Pointer })(unsafe.Pointer(&v))).Data
 }
 
-// cond is basically the conditional operator
+// cond is basically the conditional operator. Unfortunately, both paths are still evaluated so only use this when there is no extra processing for both paths.
 func cond[T any](isTrue bool, ifTrue, ifFalse T) T {
 	if isTrue {
 		return ifTrue

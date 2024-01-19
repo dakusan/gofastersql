@@ -21,7 +21,7 @@ import (
 type StructModel struct {
 	fields   []structField   //The flattened list of members from a recursive structure search
 	pointers []structPointer //Data for structure pointers (recursive)
-	rType    reflect.Type    //The type of the top level structure. Used to confirm RowReader.ScanRow*() function “output” parameter type matches
+	rType    reflect.Type    //The type of the top level structure. Used to confirm RowReader.ScanRow*() function “outPointer” parameter type matches
 }
 type structField struct {
 	offset       uintptr       //The offset of the member in structure pointed at by RowReader.pointers[pointerIndex] (which is derived from StructModel.pointers)
@@ -124,10 +124,7 @@ func ModelStructType(t reflect.Type) (StructModel, error) {
 
 // Function to determine if a struct is considered a scalar type
 func isScalarStruct(t reflect.Type) bool {
-	return isNullInheritType(t) || t == lookupType.time
-}
-func isNullInheritType(t reflect.Type) bool {
-	return t.NumField() > 0 && t.Field(0).Type == lookupType.nullInherit
+	return nullTypeStructConverters[t] != nil || t == lookupType.time
 }
 
 // Create a StructModel
@@ -228,8 +225,10 @@ func scalarToConversionFunc(fldType reflect.Type) converterFunc {
 			return cond(fldType == lookupType.rawBytes, convRawBytes, convByteArray)
 		}
 	case reflect.Struct:
-		if isScalarStruct(fldType) {
-			return cond(isNullInheritType(fldType), nullTypeStructConverters[fldType], convTime)
+		if f := nullTypeStructConverters[fldType]; f != nil {
+			return f
+		} else if fldType == lookupType.time {
+			return convTime
 		}
 	}
 
