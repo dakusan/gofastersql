@@ -64,6 +64,10 @@ func convFloat64(in []byte, p upt) error  { return convFloat[float64](in, p, 64)
 func convString(in []byte, p upt) error   { *(*string)(p) = string(in); return nil }
 func convRawBytes(in []byte, p upt) error { *(*sql.RawBytes)(p) = in; return nil }
 func convByteArray(in []byte, p upt) error {
+	if in == nil {
+		return nil
+	}
+
 	out := make([]byte, len(in))
 	copy(out, in)
 	*(*[]byte)(p) = out

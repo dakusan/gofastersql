@@ -384,7 +384,7 @@ func TestNulls(t *testing.T) {
 			t.Fatal(err)
 		} else if str, err := json.Marshal(ts2); err != nil {
 			t.Fatal(err)
-		} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":"","RB":null,"B":false}` {
+		} else if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":null,"RB":null,"B":false}` {
 			t.Fatal("Nulled structure json marshal did not match: " + string(str))
 		}
 	})
