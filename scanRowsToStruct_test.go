@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/dakusan/gofastersql/nulltypes"
 	_ "github.com/go-sql-driver/mysql"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -130,7 +131,7 @@ SELECT
 
 	/*TS9*/
 	CONCAT('P3-', i), ` + cond(noTimeTesting, `null, null`, `CAST('2001-02-03 05:06:07.21' AS DATETIME(3)), UNIX_TIMESTAMP('2005-08-09 15:16:17.62')`) + `
-FROM goTest
+FROM goTest1
 	`
 }
 
@@ -152,9 +153,9 @@ func setupTestQuery(
 	}
 
 	//Create a temporary table and fill it with values 0, 1, 0
-	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i int) ENGINE=MEMORY`); err != nil {
+	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest1 (i int) ENGINE=MEMORY`); err != nil {
 		return tx, nil, err
-	} else if _, err := tx.Exec(`INSERT INTO goTest VALUES (0), (1), (0);`); err != nil {
+	} else if _, err := tx.Exec(`INSERT INTO goTest1 VALUES (0), (1), (0);`); err != nil {
 		return tx, nil, err
 	}
 
@@ -209,12 +210,14 @@ func setupTestStruct() testStruct1 {
 	}
 }
 
-func rollbackTransactionAndRows(tx *sql.Tx, rows *sql.Rows) {
+func rollbackTransactionAndRows(tx *sql.Tx, rows *sql.Rows, testTableNum int) {
 	if rows != nil {
 		_ = rows.Close()
 	}
 	if tx != nil {
-		_, _ = tx.Exec(`DROP TEMPORARY TABLE goTest`)
+		if testTableNum != 0 {
+			_, _ = tx.Exec(`DROP TEMPORARY TABLE goTest` + strconv.Itoa(testTableNum))
+		}
 		_ = tx.Rollback()
 	}
 }
@@ -249,12 +252,12 @@ func TestAllTypes(t *testing.T) {
 	var tx *sql.Tx
 	var rows *sql.Rows
 	if _tx, _rows, err := setupTestQuery(false, false); err != nil {
-		rollbackTransactionAndRows(_tx, _rows)
+		rollbackTransactionAndRows(_tx, _rows, 1)
 		t.Fatal(err)
 	} else {
 		tx, rows = _tx, _rows
 	}
-	defer rollbackTransactionAndRows(tx, rows)
+	defer rollbackTransactionAndRows(tx, rows, 1)
 	ts1 := setupTestStruct()
 
 	//Prepare structures for the tests
@@ -334,7 +337,7 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 		type smallTest struct{ a, b int }
 		var st smallTest
 		ms := failOnErrT(t, fErr(ModelStruct(st)))
-		failOnErrT(t, fErr(0, ms.CreateReader().ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest LIMIT 1, 1")), &st)))
+		failOnErrT(t, fErr(0, ms.CreateReader().ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest1 LIMIT 1, 1")), &st)))
 		if st.a != 1 || st.b != 3 {
 			t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
 		}
@@ -344,7 +347,7 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 	t.Run("ReadRow", func(t *testing.T) {
 		type smallTest struct{ a, b int }
 		var st smallTest
-		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest LIMIT 1, 1")), &st)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest1 LIMIT 1, 1")), &st)))
 		if st.a != 1 || st.b != 3 {
 			t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
 		}
@@ -372,16 +375,16 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 func TestNulls(t *testing.T) {
 	//Connect to the database and create a transaction
 	tx := failOnErrT(t, fErr(setupSQLConnect()))
-	defer rollbackTransactionAndRows(tx, nil)
+	defer rollbackTransactionAndRows(tx, nil, 2)
 
 	//Create a temporary table and fill it with values (5, NULL)
-	failOnErrT(t, fErr(tx.Exec(`CREATE TEMPORARY TABLE goTest (i1 int NULL, i2 int NULL) ENGINE=MEMORY`)))
-	failOnErrT(t, fErr(tx.Exec(`INSERT INTO goTest VALUES (5, NULL)`)))
+	failOnErrT(t, fErr(tx.Exec(`CREATE TEMPORARY TABLE goTest2 (i1 int NULL, i2 int NULL) ENGINE=MEMORY`)))
+	failOnErrT(t, fErr(tx.Exec(`INSERT INTO goTest2 VALUES (5, NULL)`)))
 
 	//Run test for putting null onto non-null scalar types
 	t.Run("Non-null scalar with null values", func(t *testing.T) {
 		ts2 := TestStruct2{F64: new(float64)}
-		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2 FROM goTest`)), &ts2)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2, i2 FROM goTest2`)), &ts2)))
 		str := failOnErrT(t, fErr(json.Marshal(ts2)))
 		if string(str) != `{"U":0,"U8":0,"U16":0,"U32":0,"U64":0,"I":0,"I8":0,"I16":0,"I32":0,"I64":0,"F32":0,"F64":0,"S":"","BA":null,"RB":null,"B":false}` {
 			t.Fatal("Nulled structure json marshal did not match: " + string(str))
@@ -417,12 +420,12 @@ func TestNulls(t *testing.T) {
 			return strings.Join(s, ",")
 		}
 
-		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i1+1, i2, i1+2, i2, i1+3, i2, i1+4, i2, i1+5, i2, i1+6, i2, i1+7, i2, '2001-02-03 05:06:07.21' FROM goTest`)), &tsn)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i1+1, i2, i1+2, i2, i1+3, i2, i1+4, i2, i1+5, i2, i1+6, i2, i1+7, i2, '2001-02-03 05:06:07.21' FROM goTest2`)), &tsn)))
 		if tsnToString() != `6,NULL,7,NULL,8,NULL,9,NULL,10,NULL,11,NULL,12,NULL,2001-02-03 05:06:07.21` {
 			t.Fatal("Nulled scalar marshal did not match: " + tsnToString())
 		}
 
-		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i2, i1+11, i2, i1+12, i2, i1+13, i2, i1+14, i2, i1+15, i2, i1+16, i2, i1+17, i2 FROM goTest`)), &tsn)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT i2, i1+11, i2, i1+12, i2, i1+13, i2, i1+14, i2, i1+15, i2, i1+16, i2, i1+17, i2 FROM goTest2`)), &tsn)))
 		if tsnToString() != `NULL,16,NULL,17,NULL,18,NULL,19,NULL,20,NULL,21,NULL,false,NULL` {
 			t.Fatal("Nulled scalar marshal #2 did not match: " + tsnToString())
 		}
@@ -432,7 +435,7 @@ func TestNulls(t *testing.T) {
 func TestRawBytes(t *testing.T) {
 	//Connect to the database and create a transaction
 	tx := failOnErrT(t, fErr(setupSQLConnect()))
-	defer rollbackTransactionAndRows(tx, nil)
+	defer rollbackTransactionAndRows(tx, nil, 3)
 
 	type T2 struct {
 		S string
@@ -448,9 +451,9 @@ func TestRawBytes(t *testing.T) {
 	}
 
 	//Create a temporary table and fill it with values
-	failOnErrT(t, fErr(tx.Exec(`CREATE TEMPORARY TABLE goTest (i int NOT NULL, b varchar(5) NOT NULL, rb varchar(5) NOT NULL, inv int NULL, bn varchar(5) NULL, rbn varchar(5) NULL, s varchar(5)) ENGINE=MEMORY`)))
+	failOnErrT(t, fErr(tx.Exec(`CREATE TEMPORARY TABLE goTest3 (i int NOT NULL, b varchar(5) NOT NULL, rb varchar(5) NOT NULL, inv int NULL, bn varchar(5) NULL, rbn varchar(5) NULL, s varchar(5)) ENGINE=MEMORY`)))
 	failOnErrT(t, fErr(tx.Exec(
-		`INSERT INTO goTest VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO goTest3 VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
 		6, "bv1", "rb1", 5, nil, "rbn-v", "str1",
 		7, "bv2", "rb2", nil, "bn-v", nil, "str2",
 	)))
@@ -464,7 +467,7 @@ func TestRawBytes(t *testing.T) {
 	r := failOnErrT(t, fErr(ModelStruct(t1v))).CreateReader()
 
 	t.Run("Scan Rows", func(t *testing.T) {
-		rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest`)))
+		rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest3`)))
 		defer func() { safeCloseRows(rows) }()
 
 		for i := 0; i < 2; i++ {
@@ -481,7 +484,7 @@ func TestRawBytes(t *testing.T) {
 		t1Arr := make([]T1, 2)
 		for i := 0; i < 2; i++ {
 			func() {
-				rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest WHERE i=?`, 6+i)))
+				rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest3 WHERE i=?`, 6+i)))
 				defer func() { safeCloseRows(rows) }()
 				rows.Next()
 				failOnErrT(t, fErr(0, r.ScanRows(rows, &t1Arr[i])))
@@ -503,7 +506,7 @@ func TestRawBytes(t *testing.T) {
 		t1Arr := make([]T1, 2)
 		for i := 0; i < 2; i++ {
 			func() {
-				rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest WHERE i=?`, 6+i)))
+				rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest3 WHERE i=?`, 6+i)))
 				failOnErrT(t, fErr(0, r.ScanRow(rows, &t1Arr[i])))
 				str := failOnErrT(t, fErr(json.Marshal(t1Arr[i])))
 				if string(str) != resArr[i] {
@@ -524,11 +527,11 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
 	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
-		rollbackTransactionAndRows(_tx, _rows)
+		rollbackTransactionAndRows(_tx, _rows, 1)
 		b.Fatal(err)
 	} else {
 		rows = _rows
-		defer rollbackTransactionAndRows(_tx, rows)
+		defer rollbackTransactionAndRows(_tx, rows, 1)
 	}
 	rows.Next()
 	b.ResetTimer()
@@ -553,11 +556,11 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 	//Init test data
 	var rows *sql.Rows
 	if _tx, _rows, err := setupTestQuery(usePreparedQuery, true); err != nil {
-		rollbackTransactionAndRows(_tx, _rows)
+		rollbackTransactionAndRows(_tx, _rows, 1)
 		b.Fatal(err)
 	} else {
 		rows = _rows
-		defer rollbackTransactionAndRows(_tx, rows)
+		defer rollbackTransactionAndRows(_tx, rows, 1)
 	}
 	rows.Next()
 	b.ResetTimer()
@@ -630,7 +633,7 @@ func safeCloseRows(rows *sql.Rows) {
 func realBenchmarkOneItem(b *testing.B, callback func(*sql.Rows, *struct{ i1 int }) error) {
 	//Connect to the database and create a transaction
 	tx := failOnErrB(b, fErr(setupSQLConnect()))
-	defer rollbackTransactionAndRows(tx, nil)
+	defer rollbackTransactionAndRows(tx, nil, 0)
 
 	//Prepare single row functionality
 	var rows *sql.Rows
@@ -668,12 +671,12 @@ func realBenchmarkMultiItem(b *testing.B, preCallback func(*testStruct1), callba
 	//Init test data
 	var tx *sql.Tx
 	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
-		rollbackTransactionAndRows(_tx, _rows)
+		rollbackTransactionAndRows(_tx, _rows, 1)
 		b.Fatal(err)
 	} else {
 		_ = _rows.Close()
 		tx = _tx
-		defer rollbackTransactionAndRows(tx, nil)
+		defer rollbackTransactionAndRows(tx, nil, 1)
 	}
 	queryStr := getTestQueryString(true)
 

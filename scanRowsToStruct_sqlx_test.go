@@ -24,8 +24,8 @@ func BenchmarkRowReader_ScanRows_SQLX(b *testing.B) {
 	sqlxB = b
 	db := sqlxErr(sqlx.Connect("mysql", SQLConnectString))
 	tx := sqlxErr(db.Beginx())
-	sqlxErr(tx.Exec(`CREATE TEMPORARY TABLE goTest (i int) ENGINE=MEMORY`))
-	sqlxErr(tx.Exec(`INSERT INTO goTest VALUES (0)`))
+	sqlxErr(tx.Exec(`CREATE TEMPORARY TABLE goTest1 (i int) ENGINE=MEMORY`))
+	sqlxErr(tx.Exec(`INSERT INTO goTest1 VALUES (0)`))
 	rows := sqlxErr(tx.Queryx(`
 SELECT
 	/*P1 and TestStruct2*/
@@ -42,7 +42,7 @@ SELECT
 
 	/*TS9*/
 	CONCAT('P3-', i) AS "ts9.p3", null AS "ts9.t1", null AS "ts9.t2"
-FROM goTest
+FROM goTest1
 `))
 	rows.Next()
 	b.ResetTimer()
