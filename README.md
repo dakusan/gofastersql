@@ -18,7 +18,7 @@ The library’s `ModelStruct` function, upon its first invocation for a type, de
 Both `ScanRow(s)` (plural and singular) functions only accept `sql.Rows` and not `sql.Row` due to the golang implementation limitations placed upon `sql.Row`. Non-plural `ScanRow` functions automatically call `Rows.Next()` and `Rows.Close()` like the native implementation.
 
 GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package).
-  - `string`, `[]byte`, `sql.RawBytes`
+  - `string`, `[]byte`, `sql.RawBytes` *(RawBytes converted to []byte for singular RowScan functions)*
   - `bool`
   - `int`, `int8`, `int16`, `int32`, `int64`
   - `uint`, `uint8`, `uint16`, `uint32`, `uint64`

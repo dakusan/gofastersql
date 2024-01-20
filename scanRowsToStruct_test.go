@@ -1,6 +1,7 @@
 package gofastersql
 
 import (
+	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -339,11 +340,11 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 	})
 
 	t.Run("ReadRowMulti 1 item", func(t *testing.T) {
-		var a int
+		var a nulltypes.NullInt64
 		if err := ScanRowMultiWErr(SRErr(tx.Query(`SELECT 6`)), &a); err != nil {
 			t.Fatal(err)
-		} else if a != 6 {
-			t.Fatal(fmt.Sprintf("%d!=%d", a, 6))
+		} else if a.Val != 6 {
+			t.Fatal(fmt.Sprintf("%s!=%d", a, 6))
 		}
 	})
 
@@ -428,6 +429,133 @@ func TestNulls(t *testing.T) {
 			t.Fatal(err)
 		} else if tsnToString() != `NULL,16,NULL,17,NULL,18,NULL,19,NULL,20,NULL,21,NULL,false,NULL` {
 			t.Fatal("Nulled scalar marshal #2 did not match: " + tsnToString())
+		}
+	})
+}
+
+func TestRawBytes(t *testing.T) {
+	//Connect to the database and create a transaction
+	var tx *sql.Tx
+	if _tx, err := setupSQLConnect(); err != nil {
+		t.Fatal(err)
+	} else {
+		tx = _tx
+	}
+	defer rollbackTransactionAndRows(tx, nil)
+
+	type T2 struct {
+		S string
+	}
+	type T1 struct {
+		I   int64
+		B   []byte
+		RB  sql.RawBytes
+		INV nulltypes.NullInt64
+		BN  nulltypes.NullByteArray
+		RBN nulltypes.NullRawBytes
+		T2V T2
+	}
+
+	//Create a temporary table and fill it with values
+	if _, err := tx.Exec(`CREATE TEMPORARY TABLE goTest (i int NOT NULL, b varchar(5) NOT NULL, rb varchar(5) NOT NULL, inv int NULL, bn varchar(5) NULL, rbn varchar(5) NULL, s varchar(5)) ENGINE=MEMORY`); err != nil {
+		t.Fatal(err)
+	} else if _, err := tx.Exec(
+		`INSERT INTO goTest VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)`,
+		6, "bv1", "rb1", 5, nil, "rbn-v", "str1",
+		7, "bv2", "rb2", nil, "bn-v", nil, "str2",
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	resArr := []string{
+		`{"I":6,"B":"YnYx","RB":"cmIx","INV":5,"BN":null,"RBN":"rbn-v","T2V":{"S":"str1"}}`,
+		`{"I":7,"B":"YnYy","RB":"cmIy","INV":null,"BN":"bn-v","RBN":null,"T2V":{"S":"str2"}}`,
+	}
+
+	var r *RowReader
+	var t1v T1
+	if sm, err := ModelStruct(t1v); err != nil {
+		t.Fatal(err)
+	} else {
+		r = sm.CreateReader()
+	}
+
+	t.Run("Scan Rows", func(t *testing.T) {
+		var rows *sql.Rows
+		if _rows, err := tx.Query(`SELECT * FROM goTest`); err != nil {
+			t.Fatal(err)
+		} else {
+			rows = _rows
+		}
+		defer func() { safeCloseRows(rows) }()
+
+		for i := 0; i < 2; i++ {
+			rows.Next()
+			if err := r.ScanRows(rows, &t1v); err != nil {
+				t.Fatal(err)
+			} else if str, err := json.Marshal(t1v); err != nil {
+				t.Fatal(err)
+			} else if string(str) != resArr[i] {
+				t.Fatal(fmt.Sprintf("RawBytes structure json marshal #%d did not match: %s", i+1, string(str)))
+			}
+		}
+	})
+
+	t.Run("Scan Rows With Fail", func(t *testing.T) {
+		t1Arr := make([]T1, 2)
+		for i := 0; i < 2; i++ {
+			func() {
+				var rows *sql.Rows
+				defer func() { safeCloseRows(rows) }()
+				if _rows, err := tx.Query(`SELECT * FROM goTest WHERE i=?`, 6+i); err != nil {
+					t.Fatal(err)
+				} else {
+					rows = _rows
+				}
+
+				rows.Next()
+				if err := r.ScanRows(rows, &t1Arr[i]); err != nil {
+					t.Fatal(err)
+				} else if str, err := json.Marshal(t1Arr[i]); err != nil {
+					t.Fatal(err)
+				} else if string(str) != resArr[i] {
+					t.Fatal(fmt.Sprintf("RawBytes structure json marshal test2 #%d did not match: %s", i+1, string(str)))
+				}
+				rows.Next() //Required for now to bypass a nasty mysql driver bug
+				if err := rows.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}()
+		}
+
+		if bytes.Equal(t1Arr[0].RB, []byte("rb1")) || bytes.Equal(t1Arr[0].RBN.Val, []byte("rbn-v")) {
+			t.Fatal(fmt.Sprintf("RawBytes structure didn't change as expected"))
+		}
+	})
+
+	t.Run("Scan Row", func(t *testing.T) {
+		t1Arr := make([]T1, 2)
+		for i := 0; i < 2; i++ {
+			func() {
+				var rows *sql.Rows
+				if _rows, err := tx.Query(`SELECT * FROM goTest WHERE i=?`, 6+i); err != nil {
+					t.Fatal(err)
+				} else {
+					rows = _rows
+				}
+
+				if err := r.ScanRow(rows, &t1Arr[i]); err != nil {
+					t.Fatal(err)
+				} else if str, err := json.Marshal(t1Arr[i]); err != nil {
+					t.Fatal(err)
+				} else if string(str) != resArr[i] {
+					t.Fatal(fmt.Sprintf("RawBytes structure json marshal test3 #%d did not match: %s", i+1, string(str)))
+				}
+			}()
+		}
+
+		if !bytes.Equal(t1Arr[0].RB, []byte("rb1")) || !bytes.Equal(t1Arr[0].RBN.Val, []byte("rbn-v")) {
+			t.Fatal(fmt.Sprintf("RawBytes structure changed when it should have stayed the same"))
 		}
 	})
 }
@@ -544,7 +672,7 @@ func setupBenchmarkRow() {
 	runCloseRow = func(r *sql.Rows) error { return nil }
 	runRowNext = func(r *sql.Rows) bool { return true }
 }
-func setupBenchmarkCloseRows(rows *sql.Rows) {
+func safeCloseRows(rows *sql.Rows) {
 	if rows != nil {
 		_ = rows.Close()
 	}
@@ -563,7 +691,7 @@ func Benchmark_OneItem_ScanRow_Faster(b *testing.B) {
 	//Prepare single row functionality
 	var rows *sql.Rows
 	var err error
-	defer func() { setupBenchmarkCloseRows(rows) }()
+	defer func() { safeCloseRows(rows) }()
 	setupBenchmarkRow()
 
 	//Run the benchmark tests
@@ -596,7 +724,7 @@ func Benchmark_OneItem_Native(b *testing.B) {
 	//Prepare single row functionality
 	var rows *sql.Rows
 	var err error
-	defer func() { setupBenchmarkCloseRows(rows) }()
+	defer func() { safeCloseRows(rows) }()
 
 	//Run the benchmark tests
 	b.ResetTimer()
@@ -633,7 +761,7 @@ func Benchmark_MultiItem_ScanRow_Faster(b *testing.B) {
 	//Prepare single row functionality
 	var rows *sql.Rows
 	var err error
-	defer func() { setupBenchmarkCloseRows(rows) }()
+	defer func() { safeCloseRows(rows) }()
 	setupBenchmarkRow()
 
 	//Run the benchmark tests
@@ -669,7 +797,7 @@ func Benchmark_MultiItem_ScanRowMulti_Faster(b *testing.B) {
 	//Prepare single row functionality
 	var rows *sql.Rows
 	var err error
-	defer func() { setupBenchmarkCloseRows(rows) }()
+	defer func() { safeCloseRows(rows) }()
 	setupBenchmarkRow()
 
 	//Run the benchmark tests
@@ -705,7 +833,7 @@ func Benchmark_MultiItem_Native(b *testing.B) {
 	//Prepare single row functionality
 	var rows *sql.Rows
 	var err error
-	defer func() { setupBenchmarkCloseRows(rows) }()
+	defer func() { safeCloseRows(rows) }()
 
 	//Run the benchmark tests
 	b.ResetTimer()

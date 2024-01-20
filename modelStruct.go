@@ -24,17 +24,26 @@ type StructModel struct {
 	rType    reflect.Type    //The type of the top level structure. Used to confirm RowReader.ScanRow*() function “outPointer” parameter type matches
 }
 type structField struct {
-	offset       uintptr       //The offset of the member in structure pointed at by RowReader.pointers[pointerIndex] (which is derived from StructModel.pointers)
-	converter    converterFunc //The conversion function
-	pointerIndex int           //The structure index to be used for offset (RowReader.pointers[pointerIndex], which is derived from StructModel.pointers)
-	name         string        //The recursed name of the member
-	isPointer    bool          //If the member is a pointer
+	offset       uintptr          //The offset of the member in structure pointed at by RowReader.pointers[pointerIndex] (which is derived from StructModel.pointers)
+	converter    converterFunc    //The conversion function
+	pointerIndex int              //The structure index to be used for offset (RowReader.pointers[pointerIndex], which is derived from StructModel.pointers)
+	name         string           //The recursed name of the member
+	isPointer    bool             //If the member is a pointer
+	flags        structFieldFlags //Flags about the member
 }
 type structPointer struct {
 	parentIndex int     //The structure index to be used for offset (RowReader.pointers[parentIndex], which is derived from StructModel.pointers)
 	offset      uintptr //The offset of the member in structure pointed at by RowReader.pointers[parentIndex] (which is derived from StructModel.pointers)
 	name        string  //The recursed name of the member
 }
+
+type structFieldFlags uint8
+
+const (
+	sffNoFlags    structFieldFlags = 0
+	sffIsRawBytes structFieldFlags = 1 << (iota - 1) //If the member is a RawBytes type
+	sffIsNullable                                    //If the member is a nulltypes struct
+)
 
 // Store structs for future lookups
 var remStructs = make(map[reflect.Type]StructModel)
@@ -89,11 +98,12 @@ func init() {
 	}
 }
 
-var lookupType = struct{ time, nullInherit, byteArray, rawBytes reflect.Type }{
+var lookupType = struct{ time, nullInherit, byteArray, rawBytes, nullRawBytes reflect.Type }{
 	reflect.TypeOf(time.Time{}),
 	reflect.TypeOf(nulltypes.NullInherit{}),
 	reflect.TypeOf([]byte{}),
 	reflect.TypeOf(sql.RawBytes{}),
+	reflect.TypeOf(nulltypes.NullRawBytes{}),
 }
 
 //------------------------------Create StructModels-----------------------------
@@ -168,7 +178,7 @@ func createStructModelFromStruct(t reflect.Type) (StructModel, error) {
 				}
 
 				//Get the function pointer for the type
-				fn := scalarToConversionFunc(fldType)
+				fn, sff := scalarToConversionFunc(fldType)
 				if fn == nil && fldType.Kind() == reflect.Struct {
 					//Pointers to structures need to add their StructModel.pointers and redirect appropriately
 					offset, structIndex := parentOffset+fld.Offset, parentStructIndex
@@ -189,7 +199,7 @@ func createStructModelFromStruct(t reflect.Type) (StructModel, error) {
 				}
 
 				//Store the member
-				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentStructIndex, parentName + fld.Name, isPointer}
+				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentStructIndex, parentName + fld.Name, isPointer, sff}
 				fieldPos++
 			}
 
@@ -210,30 +220,34 @@ func createStructModelFromStruct(t reflect.Type) (StructModel, error) {
 }
 
 // Convert a scalar reflect.Type to its conversion function
-func scalarToConversionFunc(fldType reflect.Type) converterFunc {
+func scalarToConversionFunc(fldType reflect.Type) (converterFunc, structFieldFlags) {
 	//Handle real scalar types
 	k := fldType.Kind()
 	cf := scalarConverters[k]
 	if cf != nil {
-		return cf
+		return cf, sffNoFlags
 	}
 
 	//Handle pretend scalar types
 	switch k {
 	case reflect.Slice:
 		if fldType.AssignableTo(lookupType.byteArray) {
-			return cond(fldType == lookupType.rawBytes, convRawBytes, convByteArray)
+			if fldType == lookupType.rawBytes {
+				return convRawBytes, sffIsRawBytes
+			} else {
+				return convByteArray, sffNoFlags
+			}
 		}
 	case reflect.Struct:
 		if f := nullTypeStructConverters[fldType]; f != nil {
-			return f
+			return f, sffIsNullable | cond(fldType == lookupType.nullRawBytes, sffIsRawBytes, sffNoFlags)
 		} else if fldType == lookupType.time {
-			return convTime
+			return convTime, sffNoFlags
 		}
 	}
 
 	//Return no match
-	return nil
+	return nil, sffNoFlags
 }
 
 // Used by ScanRowMulti to create a StructModel
@@ -337,13 +351,13 @@ func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
 }
 
 func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
-	convFunc := scalarToConversionFunc(t)
+	convFunc, sff := scalarToConversionFunc(t)
 	if convFunc == nil {
 		return StructModel{}, errors.New("Invalid scalar type")
 	}
 
 	sm := StructModel{
-		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), false}},
+		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), false, sff}},
 		nil, t,
 	}
 

@@ -16,7 +16,7 @@ The library’s `ModelStruct` function, upon its first invocation for a type, de
 Both `ScanRow(s)` (plural and singular) functions only accept `sql.Rows` and not `sql.Row` due to the golang implementation limitations placed upon `sql.Row`. Non-plural `ScanRow` functions automatically call `Rows.Next()` and `Rows.Close()` like the native implementation.
 
 GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package).
-  - string, []byte, sql.RawBytes
+  - string, []byte, sql.RawBytes (RawBytes converted to []byte for singular RowScan functions)
   - bool
   - int, int8, int16, int32, int64
   - uint, uint8, uint16, uint32, uint64
@@ -119,7 +119,7 @@ func (rr *RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
 	if err := rows.Scan(rr.rawBytesAny...); err != nil {
 		return err
 	}
-	return rr.convert(outPointer)
+	return rr.convert(outPointer, false)
 }
 
 // ScanRow does an sql.Rows.Scan into the outPointer structure for a single row.
@@ -154,9 +154,10 @@ func (rr *RowReader) scanRowReal(rows *sql.Rows, outPointer any) error {
 
 	if err := rows.Scan(rr.rawBytesAny...); err != nil {
 		return err
-	} else if err := rr.convert(outPointer); err != nil {
+	} else if err := rr.convert(outPointer, true); err != nil {
 		return err
 	}
+	runRowNext(rows) //Bypass a nasty mysql driver bug
 	return runCloseRow(rows)
 }
 
@@ -226,7 +227,7 @@ func (rr *RowReader) checkType(outPointer any) error {
 }
 
 // Convert the read sql data into the output structure(s)
-func (rr *RowReader) convert(outPointer any) error {
+func (rr *RowReader) convert(outPointer any, isSingleRow bool) error {
 	//Determine pointer indexes
 	var errs []string
 	r := *rr //Store locally as we no longer need extensions at this point
@@ -251,6 +252,7 @@ func (rr *RowReader) convert(outPointer any) error {
 			continue
 		}
 
+		//Get pointer to the output data
 		p := unsafe.Add(parentPointer, sf.offset)
 		if sf.isPointer {
 			if p = *(*unsafe.Pointer)(p); p == nil {
@@ -258,7 +260,15 @@ func (rr *RowReader) convert(outPointer any) error {
 				continue
 			}
 		}
-		if err := sf.converter(r.rawBytesArr[i], upt(p)); err != nil {
+
+		//If rawBytes and isSingleRow then change output func to use a byte array instead
+		cFunc := sf.converter
+		if isSingleRow && (sf.flags&sffIsRawBytes != 0) {
+			cFunc = cond(sf.flags&sffIsNullable != 0, cvNBA, convByteArray)
+		}
+
+		//Run the conversion function
+		if err := cFunc(r.rawBytesArr[i], upt(p)); err != nil {
 			errs = append(errs, fmt.Sprintf("Error on %s: %s", sf.name, err.Error()))
 		}
 	}
