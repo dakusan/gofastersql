@@ -267,7 +267,7 @@ func TestAllTypes(t *testing.T) {
 	//Pass #1: Read into the structure and make sure it comes out correct
 	t.Run("Read into structure", func(t *testing.T) {
 		rows.Next()
-		failOnErrT(t, fErr(0, rr.ScanRows(rows, &ts1)))
+		failOnErrT(t, fErr(0, rr.ScanRowsNC(rows, &ts1)))
 		str := failOnErrT(t, fErr(json.Marshal(ts1)))
 		if string(str) != getExpectedTestQueryResult() {
 			t.Fatal("Structure json marshal did not match: " + string(str))
@@ -337,7 +337,7 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 		type smallTest struct{ a, b int }
 		var st smallTest
 		ms := failOnErrT(t, fErr(ModelStruct(st)))
-		failOnErrT(t, fErr(0, ms.CreateReader().ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest1 LIMIT 1, 1")), &st)))
+		failOnErrT(t, fErr(0, ms.CreateReader().ScanRowWErrNC(SRErr(tx.Query("SELECT i, i*3 FROM goTest1 LIMIT 1, 1")), &st)))
 		if st.a != 1 || st.b != 3 {
 			t.Fatal(fmt.Sprintf("smallTest is not the expected value ({%d,%d}!={%d,%d})", st.a, st.b, 1, 3))
 		}

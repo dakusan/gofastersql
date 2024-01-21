@@ -9,7 +9,7 @@ The flaw in the native library scanning process is its repetitive and time-consu
 
 GoFasterSQL instead precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods (5*+ vs sqlx), a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
 
-The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe. The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointer` type aligns with the type specified in `ModelStruct`.
+The library’s `ModelStruct` function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
 
 `ModelStruct` flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name.
 
@@ -27,6 +27,9 @@ GoFasterSQL supports the following member types in structures, including typedef
   - `struct` *(struct pointers add a very tiny bit of extra overhead)*
 
 GoFasterSQL is available under the same style of BSD license as the Go language, which can be found in the LICENSE file.
+
+Optimization information:
+* The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointer` type aligns with the type specified in `ModelStruct` (the *NC versions skip the check).
 
 # Example Usage
 ## Example #1
@@ -77,12 +80,12 @@ type moo struct { cow, calf nulltypes.NullInt64 }
 var fooVar foo
 var mooVar moo
 
-if err := gofastersql.ScanRow(db.QueryRow("SELECT 2, 4, 8, null"), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+if err := gofastersql.ScanRowWErr(SRErr(db.Query("SELECT 2, 4, 8, null")), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
 	panic(err)
 }
 
 //This is equivalent to the above statement but takes a lot more processing than ScanRow() and may be much slower
-if err := gofastersql.ScanRowMulti(db.QueryRow("SELECT 2, 4, 8, null"), &fooVar, &mooVar); err != nil {
+if err := gofastersql.ScanRowMultiWErr(SRErr(db.Query("SELECT 2, 4, 8, null")), &fooVar, &mooVar); err != nil {
 	panic(err)
 }
 
