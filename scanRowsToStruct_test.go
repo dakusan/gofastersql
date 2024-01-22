@@ -523,6 +523,7 @@ func TestRawBytes(t *testing.T) {
 
 //------------------------------Benchmark ScanRows------------------------------
 
+// RowReader.ScanRows(testStruct1)
 func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	//Init test data
 	var rows *sql.Rows
@@ -546,9 +547,12 @@ func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
 	}
 }
 
+// native.Rows.Scan(testStruct1 split into individual parts)
 func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
 	rowReaderScanRowsNative(b, false)
 }
+
+// native.Rows.Scan(testStruct1 split into individual parts) [prepared statement]
 func BenchmarkRowReader_ScanRows_NativePrepared(b *testing.B) {
 	rowReaderScanRowsNative(b, true)
 }
@@ -594,7 +598,7 @@ func getPointersForTestStruct(ts1 *testStruct1, timeBuff1, timeBuff2 *[]byte) []
 		&ts1.BA,
 		&ts1.RB,
 		&ts1.B,
-		&ts1.P2,
+		ts1.P2,
 		ts1.TS3.TS4.U,
 		ts1.TS3.TS4.U8,
 		ts1.TS3.TS4.U16,
@@ -612,8 +616,8 @@ func getPointersForTestStruct(ts1 *testStruct1, timeBuff1, timeBuff2 *[]byte) []
 		ts1.TS3.RB,
 		ts1.TS3.B,
 		&ts1.TS9.P3,
-		&timeBuff1,
-		&timeBuff2,
+		timeBuff1,
+		timeBuff2,
 	}
 }
 
@@ -653,12 +657,14 @@ func realBenchmarkOneItem(b *testing.B, callback func(*sql.Rows, *struct{ i1 int
 	}
 }
 
+// ScanRow(struct with 1 member)
 func Benchmark_OneItem_ScanRow_Faster(b *testing.B) {
 	realBenchmarkOneItem(b,
 		func(rows *sql.Rows, ts1 *struct{ i1 int }) error { return ScanRow(rows, ts1) },
 	)
 }
 
+// native.Rows.Scan(struct with 1 member)
 func Benchmark_OneItem_Native(b *testing.B) {
 	realBenchmarkOneItem(b,
 		func(rows *sql.Rows, ts1 *struct{ i1 int }) error { return rows.Scan(&ts1.i1) },
@@ -701,13 +707,15 @@ func realBenchmarkMultiItem(b *testing.B, preCallback func(*testStruct1), callba
 	}
 }
 
+// ScanRow(testStruct1)
 func Benchmark_MultiItem_ScanRow_Faster(b *testing.B) {
 	realBenchmarkMultiItem(b, nil,
 		func(rows *sql.Rows, ts1 *testStruct1) error { return ScanRow(rows, ts1) },
 	)
 }
 
-func Benchmark_MultiItem_ScanRowMulti_Faster(b *testing.B) {
+// ScanRow(testStruct1 split into 5 parts)
+func Benchmark_MultiItem_ScanRow_Multi_Faster(b *testing.B) {
 	realBenchmarkMultiItem(b, nil,
 		func(rows *sql.Rows, ts1 *testStruct1) error {
 			return ScanRowMulti(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
@@ -715,6 +723,7 @@ func Benchmark_MultiItem_ScanRowMulti_Faster(b *testing.B) {
 	)
 }
 
+// native.Rows.Scan(testStruct1 split into individual parts with list precalculated)
 func Benchmark_MultiItem_Native(b *testing.B) {
 	var pointers []any
 	var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers

@@ -24,12 +24,13 @@ GoFasterSQL supports the following member types in structures, including typedef
   - `uint`, `uint8`, `uint16`, `uint32`, `uint64`
   - `float32`, `float64`
   - `time.Time` *(also accepts unix timestamps ; does not currently accept typedef derivatives)*
-  - `struct` *(struct pointers add a very tiny bit of extra overhead)*
+  - `struct`
 
 GoFasterSQL is available under the same style of BSD license as the Go language, which can be found in the LICENSE file.
 
 Optimization information:
-* The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointer` type aligns with the type specified in `ModelStruct` (the *NC versions skip the check).
+* The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointer` type aligns with the type specified in `ModelStruct` (the *NC versions skip this check).
+* Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
 
 # Example Usage
 ## Example #1
@@ -52,7 +53,7 @@ type loans struct {
 
 var db sql.DB
 var b []book
-ms, err := ModelStruct(book{})
+ms, err := gofastersql.ModelStruct(book{})
 if err != nil {
 	panic(err)
 }
@@ -80,12 +81,12 @@ type moo struct { cow, calf nulltypes.NullInt64 }
 var fooVar foo
 var mooVar moo
 
-if err := gofastersql.ScanRowWErr(SRErr(db.Query("SELECT 2, 4, 8, null")), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+if err := gofastersql.ScanRowWErr(gofastersql.SRErr(db.Query("SELECT 2, 4, 8, null")), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
 	panic(err)
 }
 
 //This is equivalent to the above statement but takes a lot more processing than ScanRow() and may be much slower
-if err := gofastersql.ScanRowMultiWErr(SRErr(db.Query("SELECT 2, 4, 8, null")), &fooVar, &mooVar); err != nil {
+if err := gofastersql.ScanRowMultiWErr(gofastersql.SRErr(db.Query("SELECT 2, 4, 8, null")), &fooVar, &mooVar); err != nil {
 	panic(err)
 }
 

@@ -97,32 +97,32 @@ func getStr[T any](isNull bool, val T) string {
 	}
 }
 
-const nullTimeFormat = `2006-01-02T15:04:05.000Z`
+const nullTimeFmt = `2006-01-02T15:04:05.000Z`
 
-func (t NullUint8) MarshalJSON() ([]byte, error)     { return mj(t.IsNull, t.Val) }
-func (t NullUint16) MarshalJSON() ([]byte, error)    { return mj(t.IsNull, t.Val) }
-func (t NullUint32) MarshalJSON() ([]byte, error)    { return mj(t.IsNull, t.Val) }
-func (t NullUint64) MarshalJSON() ([]byte, error)    { return mj(t.IsNull, t.Val) }
-func (t NullInt8) MarshalJSON() ([]byte, error)      { return mj(t.IsNull, t.Val) }
-func (t NullInt16) MarshalJSON() ([]byte, error)     { return mj(t.IsNull, t.Val) }
-func (t NullInt32) MarshalJSON() ([]byte, error)     { return mj(t.IsNull, t.Val) }
-func (t NullInt64) MarshalJSON() ([]byte, error)     { return mj(t.IsNull, t.Val) }
-func (t NullFloat32) MarshalJSON() ([]byte, error)   { return mj(t.IsNull, t.Val) }
-func (t NullFloat64) MarshalJSON() ([]byte, error)   { return mj(t.IsNull, t.Val) }
-func (t NullBool) MarshalJSON() ([]byte, error)      { return mj(t.IsNull, t.Val) }
-func (t NullString) MarshalJSON() ([]byte, error)    { return qmj(t.IsNull, t.Val) }
-func (t NullByteArray) MarshalJSON() ([]byte, error) { return qmj(t.IsNull, b2s(t.Val)) }
-func (t NullRawBytes) MarshalJSON() ([]byte, error)  { return qmj(t.IsNull, b2s(t.Val)) }
-func (t NullTime) MarshalJSON() ([]byte, error)      { return qmj(t.IsNull, t.Val.Format(nullTimeFormat)) }
+func (t NullUint8) MarshalJSON() ([]byte, error)     { return makeJS(t.IsNull, t.Val) }
+func (t NullUint16) MarshalJSON() ([]byte, error)    { return makeJS(t.IsNull, t.Val) }
+func (t NullUint32) MarshalJSON() ([]byte, error)    { return makeJS(t.IsNull, t.Val) }
+func (t NullUint64) MarshalJSON() ([]byte, error)    { return makeJS(t.IsNull, t.Val) }
+func (t NullInt8) MarshalJSON() ([]byte, error)      { return makeJS(t.IsNull, t.Val) }
+func (t NullInt16) MarshalJSON() ([]byte, error)     { return makeJS(t.IsNull, t.Val) }
+func (t NullInt32) MarshalJSON() ([]byte, error)     { return makeJS(t.IsNull, t.Val) }
+func (t NullInt64) MarshalJSON() ([]byte, error)     { return makeJS(t.IsNull, t.Val) }
+func (t NullFloat32) MarshalJSON() ([]byte, error)   { return makeJS(t.IsNull, t.Val) }
+func (t NullFloat64) MarshalJSON() ([]byte, error)   { return makeJS(t.IsNull, t.Val) }
+func (t NullBool) MarshalJSON() ([]byte, error)      { return makeJS(t.IsNull, t.Val) }
+func (t NullString) MarshalJSON() ([]byte, error)    { return qtMakeJS(t.IsNull, t.Val) }
+func (t NullByteArray) MarshalJSON() ([]byte, error) { return qtMakeJS(t.IsNull, b2s(t.Val)) }
+func (t NullRawBytes) MarshalJSON() ([]byte, error)  { return qtMakeJS(t.IsNull, b2s(t.Val)) }
+func (t NullTime) MarshalJSON() ([]byte, error)      { return qtMakeJS(t.IsNull, t.Val.Format(nullTimeFmt)) }
 
-func mj[T any](isNull bool, val T) ([]byte, error) {
+func makeJS[T any](isNull bool, val T) ([]byte, error) {
 	if isNull {
 		return []byte("null"), nil
 	} else {
 		return []byte(fmt.Sprintf("%v", val)), nil
 	}
 }
-func qmj(isNull bool, val string) ([]byte, error) {
+func qtMakeJS(isNull bool, val string) ([]byte, error) {
 	if isNull {
 		return []byte("null"), nil
 	} else {
