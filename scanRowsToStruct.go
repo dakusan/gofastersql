@@ -159,6 +159,11 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runChe
 		return sql.ErrNoRows
 	}
 
+	//Nil out all values in rawBytes in case sql attempts to read a non []byte into them (security vulnerability bug in golang sql code)
+	for i := range rr.rawBytesArr {
+		rr.rawBytesArr[i] = nil
+	}
+
 	//Run the scan and conversion
 	if err := rows.Scan(rr.rawBytesAny...); err != nil {
 		return err
@@ -172,7 +177,6 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runChe
 	}
 
 	//Finish closing a single row
-	runRowNext(rows) //Bypass a nasty mysql driver bug
 	return runCloseRow(rows)
 }
 

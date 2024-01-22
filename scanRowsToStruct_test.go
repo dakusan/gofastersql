@@ -565,28 +565,6 @@ func TestRawBytes(t *testing.T) {
 		}
 	})
 
-	t.Run("Scan Rows With Fail", func(t *testing.T) {
-		t1Arr := make([]T1, 2)
-		for i := 0; i < 2; i++ {
-			func() {
-				rows := failOnErrT(t, fErr(tx.Query(`SELECT * FROM goTest3 WHERE i=?`, 6+i)))
-				defer func() { safeCloseRows(rows) }()
-				rows.Next()
-				failOnErrT(t, fErr(0, r.ScanRows(rows, &t1Arr[i])))
-				str := failOnErrT(t, fErr(json.Marshal(t1Arr[i])))
-				if string(str) != resArr[i] {
-					t.Fatal(fmt.Sprintf("RawBytes structure json marshal test2 #%d did not match: %s", i+1, string(str)))
-				}
-				rows.Next() //Required for now to bypass a nasty mysql driver bug
-				failOnErrT(t, fErr(0, rows.Close()))
-			}()
-		}
-
-		if bytes.Equal(t1Arr[0].RB, []byte("rb1")) || bytes.Equal(t1Arr[0].RBN.Val, []byte("rbn-v")) {
-			t.Fatal(fmt.Sprintf("RawBytes structure didn't change as expected"))
-		}
-	})
-
 	t.Run("Scan Row", func(t *testing.T) {
 		t1Arr := make([]T1, 2)
 		for i := 0; i < 2; i++ {
