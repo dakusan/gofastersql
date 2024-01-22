@@ -28,6 +28,7 @@ Optimization Information:
   - The sole instance of reflection following a ModelStruct call occurs during the ScanRow(s) functions, where a verification ensures that the outPointers types align with the types specified in ModelStruct (the *NC versions skip this check).
   - Creating a StructModel from a single structure requires much less overhead than the alternatives.
   - Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
+  - See https://www.github.com/dakusan/gofastersql/blob/master/benchmarks/benchmarks.png for benchmarks.
 
 Example Usage:
 

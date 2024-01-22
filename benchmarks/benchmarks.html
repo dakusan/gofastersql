@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang=en>
+<head>
+	<meta charset="UTF-8">
+	<title>GoFasterSQL benchmarks</title>
+	<!--suppress CssUnusedSymbol -->
+	<style>
+table { border-collapse:collapse; width:1024px; }
+td { border:1px solid black; padding:2px; white-space:nowrap; }
+sup a { text-decoration:none; }
+.RowTitle { background-color:lightgrey; font-size:20px; text-align:center; }
+.O { background-color:lightgreen; text-align: center; }
+.O:before {content:"x"; }
+.X { }
+.ts1 { color:mediumpurple; }
+.highlight { background-color:lightblue; }
+b, b a { color:lightsalmon; font-weight:normal; }
+.Note { white-space:normal; }
+	</style>
+	<script>
+window.onload=function() {
+	document.querySelectorAll("sup a").forEach(e => {
+		e.onclick=function() {
+			const el = document.getElementById(e.innerText)
+			el.className='highlight';
+			setTimeout(() => el.className='', 1000)
+		}
+	})
+}
+	</script>
+</head><body>
+<table>
+	<tr>
+		<td>Name</td>
+		<td>Time<sup><a href="#1">1</a></sup></td>
+		<td>Percent<sup><a href="#2">2</a></sup></td>
+		<td>RowReader<sup><a href="#3">3</a></sup></td>
+		<td>ScanRow<sup><a href="#4">4</a></sup></td>
+		<td>Native<sup><a href="#5">5</a></sup></td>
+		<td>SQLX<sup><a href="#6">6</a></sup></td>
+		<td>Combined<sup><a href="#7">7</a></sup></td>
+		<td>Multi<sup><a href="#8">8</a></sup></td>
+		<td>Individual<sup><a href="#9">9</a></sup></td>
+		<td>Note</td>
+	</tr>
+	<tr><td colspan=20 class=RowTitle>Reads into <span class=ts1>testStruct1</span> (37 fields total)</td></tr>
+	<tr>
+		<td>Faster</td><td>1.136</td><td>-</td>
+		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>Multi Faster</td><td>1.272</td><td>112%</td>
+		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>Individual Faster</td><td>1.895</td><td>167%</td>
+		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>Native</td><td>2.424</td><td>213%</td>
+		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>Native Prepared</td><td>2.888</td><td>254%</td>
+		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note>Uses prepared statement instead of a query</td>
+	</tr>
+	<tr>
+		<td>SQLX</td><td>4.973</td><td>438%</td>
+		<td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=O></td><td class=X></td><td class=X></td>
+		<td class=Note></td>
+	</tr>
+	<tr><td colspan=20 class=RowTitle>ScanRow (no RowReader) into <span class=ts1>testStruct1</span><sup><a href="#10">10</a></sup></td></tr>
+	<tr>
+		<td>SRMul Faster</td><td>1.882</td><td>-</td>
+		<td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>SRMul Multi Faster</td><td>3.578</td><td>190%</td>
+		<td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>SRMul Individual Faster</td><td>7.694</td><td>409%</td>
+		<td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>SRMul Native</td><td>2.205</td><td>117%</td>
+		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note>Unlike the first “Native” test, pointers to variables are precalculated in an array.</td>
+	</tr>
+	<tr><td colspan=20 class=RowTitle>Reading into a struct with 1 member</td></tr>
+	<tr>
+		<td>SROne Faster</td><td>.05853</td><td>-</td>
+		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>SROne ScanRow</td><td>.21000</td><td>359%</td>
+		<td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+	<tr>
+		<td>SROne Native</td><td>.05821</td><td>99.5%</td>
+		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
+		<td class=Note></td>
+	</tr>
+
+
+
+</table>
+
+<div id="1">1) Time in seconds to run 1 million iterations of just the scanning. SQL Query/Next functions occur before benchmark timing starts.</div>
+<div id="2">2) Percent time slower than the base test.</div>
+<div id="3">3) Uses <b>RowReader.ScanRows()</b> for reading</div>
+<div id="4">4) Uses <b>gofastersql.ScanRow()</b> functions (no RowReader)</div>
+<div id="5">5) Uses native <b>sql.Rows.Scan</b></div>
+<div id="6">6) Uses <b><a href="https://github.com/jmoiron/sqlx">sqlx</a></b> library</div>
+<div id="7">7) Passes in just the <span class=ts1>testStruct1</span> variable</div>
+<div id="8">8) Passes in the top level members of the <span class=ts1>testStruct1</span> variable (5 variables)</div>
+<div id="9">9) Passes in all members of <span class=ts1>testStruct1</span> individually (37 fields total)</div>
+<div id="10">10) Reading without a RowReader is expected to take much longer, but using it with a single struct is still usually faster than the alternatives.</div>
+</body></html>

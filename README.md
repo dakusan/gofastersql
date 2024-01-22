@@ -32,6 +32,7 @@ Optimization information:
 * The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointers` types align with the types specified in `ModelStruct` (the *NC versions skip this check).
 * Creating a StructModel from a single structure requires much less overhead than the alternatives.
 * Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
+* See [here](benchmarks/benchmarks.png) for benchmarks [html file <sub>cannot be rendered in GitHub</sub>](benchmarks/benchmarks.html).
 
 # Example Usage
 ## Example #1
