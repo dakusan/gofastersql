@@ -7,7 +7,7 @@ The flaw in the native library scanning process is its repetitive and time-consu
 
 GoFasterSQL instead precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods (5*+ vs sqlx), a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
 
-The library’s ModelStruct function, upon its first invocation for a type, determines the structure of that type through recursive reflection. This structure is then cached, allowing for swift reuse in subsequent calls to ModelStruct. This process needs to be executed only once, and its output is concurrency-safe.
+The library’s ModelStruct function, upon its first invocation for a list of types, determines the structure of those types through recursive reflection. These structures are then cached, allowing for swift reuse in subsequent calls to ModelStruct. This process needs to be executed only once, and its output is concurrency-safe.
 
 ModelStruct flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name.
 
@@ -15,7 +15,7 @@ RowReaders, created via StructModel.CreateReader(), are not concurrency safe and
 
 Both ScanRow(s) (plural and singular) functions only accept sql.Rows and not sql.Row due to the golang implementation limitations placed upon sql.Row. Non-plural ScanRow functions automatically call Rows.Next() and Rows.Close() like the native implementation.
 
-GoFasterSQL supports the following member types in structures, including typedef derivatives, pointers to any of these types, and nullable derivatives (see nulltypes package).
+GoFasterSQL supports the following types, including: typedef derivatives, nested use in structures (including pointers to the types), and nullable derivatives (see nulltypes package).
   - string, []byte, sql.RawBytes (RawBytes converted to []byte for singular RowScan functions)
   - bool
   - int, int8, int16, int32, int64
@@ -25,7 +25,8 @@ GoFasterSQL supports the following member types in structures, including typedef
   - struct
 
 Optimization Information:
-  - The sole instance of reflection following a ModelStruct call occurs during the ScanRow(s) functions, where a verification ensures that the outPointer type aligns with the type specified in ModelStruct (the *NC versions skip this check).
+  - The sole instance of reflection following a ModelStruct call occurs during the ScanRow(s) functions, where a verification ensures that the outPointers types align with the types specified in ModelStruct (the *NC versions skip this check).
+  - Creating a StructModel from a single structure requires much less overhead than the alternatives.
   - Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
 
 Example Usage:
@@ -72,6 +73,10 @@ is equivalent to:
 
 and is much faster to boot!
 
+It is also equivalent to (but a little faster than):
+
+	ModelStruct(...).CreateReader().ScanRows(rows, &temp.name, &temp.cardCatalogID, &temp.student, temp.l)
+
 See README.md for further examples
 */
 package gofastersql
@@ -114,13 +119,13 @@ type SRErrStruct struct {
 }
 
 /*
-DoScan is the primary row scanning function that all other row scanning functions call. It does an sql.Rows.Scan() into the outPointer structure.
+DoScan is the primary row scanning function that all other row scanning functions call. It does an sql.Rows.Scan() into the outPointers variables.
 
   - err: If set then the only actions are that rows is closed and the error is returned
-  - runCheck: If true then an error is returned if outPointer’s type does not match the RowReader’s input type. If false then the type is not checked.
+  - runCheck: If true then an error is returned if outPointers types do not match the RowReader’s input type. If false then the type is not checked.
   - isSingleRow: If true then rows.Next() is called before the scan and rows.Close() is always called before the function ends
 */
-func (rr *RowReader) DoScan(rows *sql.Rows, outPointer any, err error, runCheck, isSingleRow bool) error {
+func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runCheck, isSingleRow bool) error {
 	//Pass through error
 	if err != nil {
 		runSafeCloseRow(rows)
@@ -132,11 +137,16 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointer any, err error, runCheck,
 		defer runSafeCloseRow(rows)
 	}
 
-	//Make sure the outPointer type matches
+	//Make sure the outPointers types match
+	if len(outPointers) != len(rr.sm.rTypes) {
+		return fmt.Errorf("outPointers is incorrect length %d!=%d", len(outPointers), len(rr.sm.rTypes))
+	}
 	if runCheck {
-		t := reflect.TypeOf(outPointer)
-		if t.Kind() != reflect.Pointer || t.Elem() != rr.sm.rType {
-			return fmt.Errorf("outPointer type is incorrect (%s)!=(*%s)", reflect.TypeOf(outPointer).String(), rr.sm.rType.String())
+		for i, v := range outPointers {
+			t := reflect.TypeOf(v)
+			if t.Kind() != reflect.Pointer || t.Elem() != rr.sm.rTypes[i] {
+				return fmt.Errorf("outPointers[%d] type is incorrect (%s)!=(*%s)", i, t.String(), rr.sm.rTypes[i].String())
+			}
 		}
 	}
 
@@ -151,7 +161,7 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointer any, err error, runCheck,
 	//Run the scan and conversion
 	if err := rows.Scan(rr.rawBytesAny...); err != nil {
 		return err
-	} else if err := rr.convert(outPointer, isSingleRow); err != nil {
+	} else if err := rr.convert(outPointers, isSingleRow); err != nil {
 		return err
 	}
 
@@ -165,110 +175,103 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointer any, err error, runCheck,
 	return runCloseRow(rows)
 }
 
-// ScanRows does an sql.Rows.Scan into the outPointer structure.
+// ScanRows does an sql.Rows.Scan into the outPointers variables.
 //
-// Just runs: rr.DoScan(rows, outPointer, nil, true, false)
-func (rr *RowReader) ScanRows(rows *sql.Rows, outPointer any) error {
-	return rr.DoScan(rows, outPointer, nil, true, false)
+// Just runs: rr.DoScan(rows, outPointers, nil, true, false)
+func (rr *RowReader) ScanRows(rows *sql.Rows, outPointers ...any) error {
+	return rr.DoScan(rows, outPointers, nil, true, false)
 }
 
-// ScanRowsNC does an sql.Rows.Scan into the outPointer structure. No type check is done on outPointer.
+// ScanRowsNC does an sql.Rows.Scan into the outPointers variables. No type checks are done on outPointers.
 //
-// Just runs: rr.DoScan(rows, outPointer, nil, false, false)
-func (rr *RowReader) ScanRowsNC(rows *sql.Rows, outPointer any) error {
-	return rr.DoScan(rows, outPointer, nil, false, false)
+// Just runs: rr.DoScan(rows, outPointers, nil, false, false)
+func (rr *RowReader) ScanRowsNC(rows *sql.Rows, outPointers ...any) error {
+	return rr.DoScan(rows, outPointers, nil, false, false)
 }
 
-// ScanRow does an sql.Rows.Scan into the outPointer structure for a single row.
+// ScanRow does an sql.Rows.Scan into the outPointers variables for a single row.
 //
-// Just runs: rr.DoScan(rows, outPointer, nil, true, true)
-func (rr *RowReader) ScanRow(rows *sql.Rows, outPointer any) error {
-	return rr.DoScan(rows, outPointer, nil, true, true)
+// Just runs: rr.DoScan(rows, outPointers, nil, true, true)
+func (rr *RowReader) ScanRow(rows *sql.Rows, outPointers ...any) error {
+	return rr.DoScan(rows, outPointers, nil, true, true)
 }
 
-// ScanRowNC does an sql.Rows.Scan into the outPointer structure for a single row. No type check is done on outPointer.
+// ScanRowNC does an sql.Rows.Scan into the outPointers variables for a single row. No type checks are done on outPointers.
 //
-// Just runs: rr.DoScan(rows, outPointer, nil, false, true)
-func (rr *RowReader) ScanRowNC(rows *sql.Rows, outPointer any) error {
-	return rr.DoScan(rows, outPointer, nil, false, true)
+// Just runs: rr.DoScan(rows, outPointers, nil, false, true)
+func (rr *RowReader) ScanRowNC(rows *sql.Rows, outPointers ...any) error {
+	return rr.DoScan(rows, outPointers, nil, false, true)
 }
 
 // ScanRowWErr : See rr.ScanRow and SRErr
 //
-// Just runs: rr.DoScan(rowsErr.r, outPointer, rowsErr.err, true, true)
-func (rr *RowReader) ScanRowWErr(rowsErr SRErrStruct, outPointer any) error {
-	return rr.DoScan(rowsErr.r, outPointer, rowsErr.err, true, true)
+// Just runs: rr.DoScan(rowsErr.r, outPointers, rowsErr.err, true, true)
+func (rr *RowReader) ScanRowWErr(rowsErr SRErrStruct, outPointers ...any) error {
+	return rr.DoScan(rowsErr.r, outPointers, rowsErr.err, true, true)
 }
 
 // ScanRowWErrNC : See rr.ScanRowNC and SRErr
 //
-// Just runs: rr.DoScan(rowsErr.r, outPointer, rowsErr.err, false, true)
-func (rr *RowReader) ScanRowWErrNC(rowsErr SRErrStruct, outPointer any) error {
-	return rr.DoScan(rowsErr.r, outPointer, rowsErr.err, false, true)
+// Just runs: rr.DoScan(rowsErr.r, outPointers, rowsErr.err, false, true)
+func (rr *RowReader) ScanRowWErrNC(rowsErr SRErrStruct, outPointers ...any) error {
+	return rr.DoScan(rowsErr.r, outPointers, rowsErr.err, false, true)
 }
 
 /*
-ScanRow does an sql.Rows.Scan into the outPointer variable for a single row.
+ScanRow does an sql.Rows.Scan into the outPointers variables for a single row. Output variables must be pointers.
 
 This is essentially the same as:
 
-	ModelStruct(*outPointer).CreateReader().ScanRow(row, outPointer)
+	ModelStruct(outPointers...).CreateReader().ScanRow(row, outPointers...)
 
 If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
-In some cases this may even be slower than the native sql.Rows.Scan() method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in gofastersql.ScanRow() and especially in gofastersql.ScanRowMulti().
+In some cases this may even be slower than the native sql.Rows.Scan() method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in gofastersql.ScanRow().
 */
-func ScanRow[T any](rows *sql.Rows, outPointer *T) error {
-	if sm, err := ModelStructType(reflect.TypeOf(outPointer).Elem()); err != nil {
+func ScanRow(rows *sql.Rows, outPointers ...any) error {
+	//Make sure all variables are pointers
+	for i, v := range outPointers {
+		if reflect.TypeOf(v).Kind() != reflect.Pointer {
+			runSafeCloseRow(rows)
+			return fmt.Errorf("Parameter #%d is not a pointer", i+1)
+		}
+	}
+
+	if sm, err := ModelStruct(outPointers...); err != nil {
 		runSafeCloseRow(rows)
 		return err
 	} else {
-		return sm.CreateReader().DoScan(rows, outPointer, nil, false, true)
+		return sm.CreateReader().DoScan(rows, outPointers, nil, false, true)
 	}
 }
 
 // ScanRowWErr : See ScanRow and SRErr
-func ScanRowWErr[T any](rowsErr SRErrStruct, outPointer *T) error {
+func ScanRowWErr(rowsErr SRErrStruct, outPointers ...any) error {
 	if rowsErr.err != nil {
 		runSafeCloseRow(rowsErr.r)
 		return rowsErr.err
 	}
-	return ScanRow[T](rowsErr.r, outPointer)
+	return ScanRow(rowsErr.r, outPointers...)
 }
 
-/*
-ScanRowMulti does an sql.Rows.Scan into the outPointer variables for a single row. Output variables can be scalar types instead of structs. Output variables must be pointers.
-
-This is essentially the same as:
-
-	ScanRow(row, &struct{*outputType1; *outputType2; ...}{&output1, &output2, ...})
-
-If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
-This takes a lot more processing than ScanRow() and may be much slower.
-*/
-func ScanRowMulti(rows *sql.Rows, output ...any) error {
-	defer runSafeCloseRow(rows)
-	if sm, outArr, err := getMultipleStructsAsStructModel(output); err != nil {
-		return err
+// Convert the read sql data into the output variables
+func (rr *RowReader) convert(outPointers []any, isSingleRow bool) error {
+	//Get the outputPointer
+	r := *rr //Store locally as we no longer need extensions at this point
+	var outPointer unsafe.Pointer
+	if rr.sm.isSimple {
+		outPointer = interface2Pointer(outPointers[0])
 	} else {
-		return sm.CreateReader().DoScan(rows, &outArr[0], nil, false, true)
+		//Create an array that holds all the pointers
+		outArr := make([]unsafe.Pointer, len(outPointers))
+		for i, v := range outPointers {
+			outArr[i] = interface2Pointer(v)
+		}
+		outPointer = unsafe.Pointer(&outArr[0])
 	}
-}
 
-// ScanRowMultiWErr : See ScanRowMulti and SRErr
-func ScanRowMultiWErr(rowsErr SRErrStruct, output ...any) error {
-	if rowsErr.err != nil {
-		runSafeCloseRow(rowsErr.r)
-		return rowsErr.err
-	}
-	return ScanRowMulti(rowsErr.r, output...)
-}
-
-// Convert the read sql data into the output structure(s)
-func (rr *RowReader) convert(outPointer any, isSingleRow bool) error {
 	//Determine pointer indexes
 	var errs []string
-	r := *rr //Store locally as we no longer need extensions at this point
-	r.pointers[0] = interface2Pointer(outPointer)
+	r.pointers[0] = outPointer
 	for i, p := range r.sm.pointers {
 		newPtr := unsafe.Pointer(nil)
 		if r.pointers[p.parentIndex] != nil {

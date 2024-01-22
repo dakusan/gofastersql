@@ -298,9 +298,15 @@ func TestAllTypes(t *testing.T) {
 	//Make sure we get back the same struct on a second attempt
 	ts2 := testStruct1{}
 	t.Run("Struct model equivalency", func(t *testing.T) {
-		sm2 := failOnErrT(t, fErr(ModelStruct(ts2)))
+		sm2 := failOnErrT(t, fErr(ModelStruct(&ts2)))
 		if !sm2.Equals(sm) {
 			t.Fatal("Struct models are not for the same struct")
+		}
+		if failOnErrT(t, fErr(ModelStruct(5, 6))).Equals(sm) {
+			t.Fatal("Struct models are the same struct?")
+		}
+		if failOnErrT(t, fErr(ModelStruct(5))).Equals(sm) {
+			t.Fatal("Struct models are the same struct?")
 		}
 	})
 
@@ -329,6 +335,16 @@ func TestAllTypes(t *testing.T) {
 	})
 	_ = rows.Close()
 
+	t.Run("New type used twice", func(t *testing.T) {
+		var a, b int16
+		var c, d int
+		var e int8
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query("SELECT 6, 7, 8, 9, 10")), &a, &c, &b, &d, &e)))
+		if a != 6 || c != 7 || b != 8 || d != 9 || e != 10 {
+			t.Fatal(fmt.Sprintf("Incorrect results received (%d,%d,%d,%d,%d)!=(%d,%d,%d,%d,%d)", a, c, b, d, e, 6, 7, 8, 9, 10))
+		}
+	})
+
 	testReadRow(t, tx)
 }
 func testReadRow(t *testing.T, tx *sql.Tx) {
@@ -343,8 +359,8 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 		}
 	})
 
-	//Test ReadRow
-	t.Run("ReadRow", func(t *testing.T) {
+	//Test ScanRow
+	t.Run("ScanRow 1 struct", func(t *testing.T) {
 		type smallTest struct{ a, b int }
 		var st smallTest
 		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query("SELECT i, i*3 FROM goTest1 LIMIT 1, 1")), &st)))
@@ -353,21 +369,90 @@ func testReadRow(t *testing.T, tx *sql.Tx) {
 		}
 	})
 
-	t.Run("ReadRowMulti 1 item", func(t *testing.T) {
+	t.Run("ScanRow 1 scalar", func(t *testing.T) {
+		var a int
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT 6`)), &a)))
+		if a != 6 {
+			t.Fatal(fmt.Sprintf("%d!=%d", a, 6))
+		}
+	})
+
+	t.Run("ScanRow 1 null scalar", func(t *testing.T) {
 		var a nulltypes.NullInt64
-		failOnErrT(t, fErr(0, ScanRowMultiWErr(SRErr(tx.Query(`SELECT 6`)), &a)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(`SELECT 6`)), &a)))
 		if a.Val != 6 {
 			t.Fatal(fmt.Sprintf("%s!=%d", a, 6))
 		}
 	})
 
-	//Test ReadRowMulti
-	t.Run("ReadRowMulti", func(t *testing.T) {
+	t.Run("ScanRow non pointer", func(t *testing.T) {
+		var a int
+		if err := ScanRow(nil, &a, a); err == nil || err.Error() != "Parameter #2 is not a pointer" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+
+	t.Run("ScanRow multiple variables", func(t *testing.T) {
 		ts1 := setupTestStruct()
-		failOnErrT(t, fErr(0, ScanRowMultiWErr(SRErr(tx.Query(getTestQueryString(false))), &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)))
+		failOnErrT(t, fErr(0, ScanRowWErr(SRErr(tx.Query(getTestQueryString(false))), &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)))
 		str := failOnErrT(t, fErr(json.Marshal(ts1)))
 		if string(str) != getExpectedTestQueryResult() {
 			t.Fatal("Structure json marshal for ReadRowMulti did not match: " + string(str))
+		}
+	})
+}
+
+func TestMultiVars(t *testing.T) {
+	//Init test data
+	var tx *sql.Tx
+	var rows *sql.Rows
+	if _tx, _rows, err := setupTestQuery(false, false); err != nil {
+		rollbackTransactionAndRows(_tx, _rows, 1)
+		t.Fatal(err)
+	} else {
+		tx, rows = _tx, _rows
+	}
+	defer rollbackTransactionAndRows(tx, rows, 1)
+	ts1 := setupTestStruct()
+
+	//Prepare structures for the tests
+	sm := failOnErrT(t, fErr(ModelStruct(ts1.P1, ts1.TestStruct2, ts1.P2, &ts1.TS3, *ts1.TS9))) //Note, this tests using both pointers and non pointers
+	rr := sm.CreateReader()
+
+	//Read into the structure and make sure it comes out correct
+	t.Run("Read into structure", func(t *testing.T) {
+		rows.Next()
+		failOnErrT(t, fErr(0, rr.ScanRowsNC(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)))
+		str := failOnErrT(t, fErr(json.Marshal(ts1)))
+		if string(str) != getExpectedTestQueryResult() {
+			t.Fatal("Structure json marshal did not match: " + string(str))
+		}
+	})
+
+	//Test incorrect number and types of variables
+	t.Run("Incorrect len", func(t *testing.T) {
+		var a int
+		if err := rr.ScanRows(rows, &a); err == nil || err.Error() != "outPointers is incorrect length 1!=5" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+	t.Run("Incorrect type #1", func(t *testing.T) {
+		var a int
+		if err := rr.ScanRows(rows, &ts1.P1, &a, &a, &a, &a); err == nil || err.Error() != "outPointers[1] type is incorrect (*int)!=(*gofastersql.TestStruct2)" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+	t.Run("Incorrect type #2", func(t *testing.T) {
+		var a int
+		if err := rr.ScanRows(rows, &ts1.P1, ts1.TestStruct2, &a, &a, &a); err == nil || err.Error() != "outPointers[1] type is incorrect (gofastersql.TestStruct2)!=(*gofastersql.TestStruct2)" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+
+	//Test empty model
+	t.Run("Model empty", func(t *testing.T) {
+		if _, err := ModelStruct(); err == nil || err.Error() != "At least 1 variable is required" {
+			t.Fatal(fmt.Sprintf("Expected error not given: %v", err))
 		}
 	})
 }
@@ -523,40 +608,7 @@ func TestRawBytes(t *testing.T) {
 
 //------------------------------Benchmark ScanRows------------------------------
 
-// RowReader.ScanRows(testStruct1)
-func BenchmarkRowReader_ScanRows_Faster(b *testing.B) {
-	//Init test data
-	var rows *sql.Rows
-	if _tx, _rows, err := setupTestQuery(false, true); err != nil {
-		rollbackTransactionAndRows(_tx, _rows, 1)
-		b.Fatal(err)
-	} else {
-		rows = _rows
-		defer rollbackTransactionAndRows(_tx, rows, 1)
-	}
-	rows.Next()
-	b.ResetTimer()
-
-	//Run the benchmark tests
-	for i := 0; i < b.N; i++ {
-		ts1 := setupTestStruct()
-		rr := failOnErrB(b, fErr(ModelStruct(ts1))).CreateReader()
-		for n := 0; n < NumBenchmarkScanRowsPasses; n++ {
-			failOnErrB(b, fErr(0, rr.ScanRows(rows, &ts1)))
-		}
-	}
-}
-
-// native.Rows.Scan(testStruct1 split into individual parts)
-func BenchmarkRowReader_ScanRows_Native(b *testing.B) {
-	rowReaderScanRowsNative(b, false)
-}
-
-// native.Rows.Scan(testStruct1 split into individual parts) [prepared statement]
-func BenchmarkRowReader_ScanRows_NativePrepared(b *testing.B) {
-	rowReaderScanRowsNative(b, true)
-}
-func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
+func realBenchmarkScanRows(b *testing.B, usePreparedQuery bool, preCallback func(*testStruct1), callback func(*sql.Rows, *testStruct1) error) {
 	//Init test data
 	var rows *sql.Rows
 	if _tx, _rows, err := setupTestQuery(usePreparedQuery, true); err != nil {
@@ -572,11 +624,68 @@ func rowReaderScanRowsNative(b *testing.B, usePreparedQuery bool) {
 	//Run the benchmark tests
 	for i := 0; i < b.N; i++ {
 		ts1 := setupTestStruct()
-		var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+		if preCallback != nil {
+			preCallback(&ts1)
+		}
 		for n := 0; n < NumBenchmarkScanRowsPasses; n++ {
-			failOnErrB(b, fErr(0, rows.Scan(getPointersForTestStruct(&ts1, &timeBuff1, &timeBuff2)...)))
+			failOnErrB(b, fErr(0, callback(rows, &ts1)))
 		}
 	}
+}
+
+// RowReader.ScanRows(testStruct1)
+func Benchmark_RowReader_ScanRows_Faster(b *testing.B) {
+	var rr *RowReader
+	realBenchmarkScanRows(
+		b, false,
+		func(ts1 *testStruct1) { rr = failOnErrB(b, fErr(ModelStruct(ts1))).CreateReader() },
+		func(rows *sql.Rows, ts1 *testStruct1) error { return rr.ScanRows(rows, ts1) },
+	)
+}
+
+// RowReader.ScanRows(testStruct1 split into 5 parts)
+func Benchmark_RowReader_ScanRows_Multi_Faster(b *testing.B) {
+	var rr *RowReader
+	realBenchmarkScanRows(
+		b, false,
+		func(ts1 *testStruct1) {
+			rr = failOnErrB(b, fErr(ModelStruct(&ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9))).CreateReader()
+		},
+		func(rows *sql.Rows, ts1 *testStruct1) error {
+			return rr.ScanRows(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
+		},
+	)
+}
+
+// RowReader.ScanRows(testStruct1 split into individual parts)
+func Benchmark_RowReader_ScanRows_Individual_Faster(b *testing.B) {
+	var rr *RowReader
+	var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+	realBenchmarkScanRows(
+		b, false,
+		func(ts1 *testStruct1) {
+			rr = failOnErrB(b, fErr(ModelStruct(getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...))).CreateReader()
+		},
+		func(rows *sql.Rows, ts1 *testStruct1) error {
+			return rr.ScanRows(rows, getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...)
+		},
+	)
+}
+
+// native.Rows.Scan(testStruct1 split into individual parts)
+func Benchmark_RowReader_ScanRows_Native(b *testing.B) {
+	var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+	realBenchmarkScanRows(b, false, nil, func(rows *sql.Rows, ts1 *testStruct1) error {
+		return rows.Scan(getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...)
+	})
+}
+
+// native.Rows.Scan(testStruct1 split into individual parts) [prepared statement]
+func Benchmark_RowReader_ScanRows_NativePrepared(b *testing.B) {
+	var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+	realBenchmarkScanRows(b, true, nil, func(rows *sql.Rows, ts1 *testStruct1) error {
+		return rows.Scan(getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...)
+	})
 }
 
 func getPointersForTestStruct(ts1 *testStruct1, timeBuff1, timeBuff2 *[]byte) []any {
@@ -657,6 +766,14 @@ func realBenchmarkOneItem(b *testing.B, callback func(*sql.Rows, *struct{ i1 int
 	}
 }
 
+// RowReader.ScanRows(struct with 1 member)
+func Benchmark_OneItem_ScanRows_Faster(b *testing.B) {
+	rr := failOnErrB(b, fErr(ModelStruct((*struct{ i1 int })(nil)))).CreateReader()
+	realBenchmarkOneItem(b,
+		func(rows *sql.Rows, ts1 *struct{ i1 int }) error { return rr.ScanRows(rows, ts1) },
+	)
+}
+
 // ScanRow(struct with 1 member)
 func Benchmark_OneItem_ScanRow_Faster(b *testing.B) {
 	realBenchmarkOneItem(b,
@@ -718,8 +835,18 @@ func Benchmark_MultiItem_ScanRow_Faster(b *testing.B) {
 func Benchmark_MultiItem_ScanRow_Multi_Faster(b *testing.B) {
 	realBenchmarkMultiItem(b, nil,
 		func(rows *sql.Rows, ts1 *testStruct1) error {
-			return ScanRowMulti(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
+			return ScanRow(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
 		},
+	)
+}
+
+// native.Rows.Scan(testStruct1 split into individual parts with list precalculated)
+func Benchmark_MultiItem_ScanRow_Individual_Faster(b *testing.B) {
+	var pointers []any
+	var timeBuff1, timeBuff2 []byte //Since MySQL time.Time support seems to not work, need to scan into byte buffers
+	realBenchmarkMultiItem(b,
+		func(ts1 *testStruct1) { pointers = getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2) },
+		func(rows *sql.Rows, ts1 *testStruct1) error { return ScanRow(rows, pointers...) },
 	)
 }
 

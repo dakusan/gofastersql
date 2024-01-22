@@ -18,10 +18,12 @@ import (
 //---------------------------Primary models and cache---------------------------
 
 // StructModel holds the model of a structure for processing as a RowReader. StructModel is concurrency safe.
+// If requested to model multiple types (or just a non-struct scalar) then a hacky version is used that emulates the array of variables as a single struct with pointers to each variable.
 type StructModel struct {
 	fields   []structField   //The flattened list of members from a recursive structure search
 	pointers []structPointer //Data for structure pointers (recursive)
-	rType    reflect.Type    //The type of the top level structure. Used to confirm RowReader.ScanRow*() function “outPointer” parameter type matches
+	rTypes   []reflect.Type  //The types of the top level structures. Used to confirm RowReader.ScanRow*() function “outPointers” parameters’ types match
+	isSimple bool            //If this is modeling a single structure (not a list of variables)
 }
 type structField struct {
 	offset       uintptr          //The offset of the member in structure pointed at by RowReader.pointers[pointerIndex] (which is derived from StructModel.pointers)
@@ -108,28 +110,34 @@ var lookupType = struct{ time, nullInherit, byteArray, rawBytes, nullRawBytes re
 
 //------------------------------Create StructModels-----------------------------
 
-// ModelStruct extracts the model of a structure for processing as a RowReader.
-// This is just a wrapper for ModelStructType.
-func ModelStruct(s any) (StructModel, error) {
-	return ModelStructType(reflect.TypeOf(s))
-}
-
-// ModelStructType extracts the model of a structure for processing as a RowReader.
-func ModelStructType(t reflect.Type) (StructModel, error) {
-	//Throw error if a structure is not passed
-	if t.Kind() != reflect.Struct {
-		return StructModel{}, fmt.Errorf("Not a %s", reflect.Struct.String())
+// ModelStruct extracts the model of variables for processing as a RowReader. It can take both pointers and non-pointers.
+func ModelStruct(s ...any) (StructModel, error) {
+	//If no variables passed return an error
+	if len(s) == 0 {
+		return StructModel{}, errors.New("At least 1 variable is required")
 	}
 
-	//If we already have the structure model cached then return it
-	remLock.RLock()
-	if s, ok := remStructs[t]; ok {
-		remLock.RUnlock()
-		return s, nil
-	}
-	remLock.RUnlock()
+	//If only 1 variable is passed, and it is a structure, create a simple StructModel
+	if len(s) == 1 {
+		t := reflect.TypeOf(s[0])
+		if t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+		if t.Kind() == reflect.Struct && !isScalarStruct(t) {
+			//If we already have the structure model cached then return it
+			remLock.RLock()
+			if s, ok := remStructs[t]; ok {
+				remLock.RUnlock()
+				return s, nil
+			}
+			remLock.RUnlock()
 
-	return createStructModelFromStruct(t)
+			return createStructModelFromStruct(t)
+		}
+	}
+
+	ret, err := getMultipleStructsAsStructModel(s)
+	return ret, err
 }
 
 // Function to determine if a struct is considered a scalar type
@@ -162,7 +170,7 @@ func createStructModelFromStruct(t reflect.Type) (StructModel, error) {
 	}
 
 	//Create the structure model
-	ret := StructModel{make([]structField, numFields), make([]structPointer, numStructPointers), t}
+	ret := StructModel{make([]structField, numFields), make([]structPointer, numStructPointers), []reflect.Type{t}, true}
 	{
 		var processStruct func(reflect.Type, uintptr, int, string) []string
 		fieldPos := 0
@@ -250,21 +258,32 @@ func scalarToConversionFunc(fldType reflect.Type) (converterFunc, structFieldFla
 	return nil, sffNoFlags
 }
 
-// Used by ScanRowMulti to create a StructModel
-func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
+// Creates a non-simple StructModel
+func getMultipleStructsAsStructModel(vars []any) (StructModel, error) {
 	//Pull the StructModels that we already have cached
 	errs := make([]string, 0, len(vars))
 	varSMs := make([]StructModel, len(vars))
-	remLock.RLock()
-	for i, v := range vars {
-		t := reflect.TypeOf(v)
-		if t.Kind() == reflect.Pointer {
-			if s, ok := remStructs[t.Elem()]; ok {
+	var newTypes map[reflect.Type]StructModel
+	newSM := StructModel{isSimple: false, rTypes: make([]reflect.Type, len(vars))}
+	{
+		numMissing := len(vars)
+		remLock.RLock()
+		for i, v := range vars {
+			t := reflect.TypeOf(v)
+			if t.Kind() == reflect.Pointer {
+				t = t.Elem()
+			}
+			newSM.rTypes[i] = t
+			if s, ok := remStructs[t]; ok {
 				varSMs[i] = s
+				numMissing--
 			}
 		}
+		remLock.RUnlock()
+		if numMissing != 0 {
+			newTypes = make(map[reflect.Type]StructModel, numMissing)
+		}
 	}
-	remLock.RUnlock()
 
 	//Pull the uncached StructModels
 	for i, v := range vars {
@@ -275,11 +294,15 @@ func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
 
 		//Get type pointed to
 		t := reflect.TypeOf(v)
-		if t.Kind() != reflect.Pointer {
-			errs = append(errs, fmt.Sprintf("Parameter #%d of type “%s” is not a pointer", i, t.String()))
+		if t.Kind() == reflect.Pointer {
+			t = t.Elem()
+		}
+
+		//If the new type was already stored in this run then use that
+		if newVal, exists := newTypes[t]; exists {
+			varSMs[i] = newVal
 			continue
 		}
-		t = t.Elem()
 
 		//Pull the StructModel for structs or scalars
 		var err error
@@ -295,22 +318,16 @@ func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
 			errs = append(errs, fmt.Sprintf("Parameter #%d of type “%s” has errors:\n%s", i, t.String(), err.Error()))
 		} else {
 			varSMs[i] = sm
+			newTypes[t] = sm
 		}
 	}
 
 	//Return errors
 	if len(errs) != 0 {
-		return StructModel{}, nil, errors.New(strings.Join(errs, "\n\n"))
-	}
-
-	//Create an array that holds all the pointers
-	outArr := make([]upt, len(vars))
-	for i, v := range vars {
-		outArr[i] = upt(interface2Pointer(v))
+		return StructModel{}, errors.New(strings.Join(errs, "\n\n"))
 	}
 
 	//Initialize newSM (get number of pointers and fields)
-	var newSM StructModel
 	{
 		numPointers, numFields := 0, 0
 		for _, sm := range varSMs {
@@ -347,7 +364,7 @@ func getMultipleStructsAsStructModel(vars []any) (StructModel, []upt, error) {
 		curPointerIndex += len(sm.pointers)
 	}
 
-	return newSM, outArr, nil
+	return newSM, nil
 }
 
 func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
@@ -358,7 +375,7 @@ func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
 
 	sm := StructModel{
 		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), false, sff}},
-		nil, t,
+		nil, []reflect.Type{t}, false,
 	}
 
 	//Cache the structure model
@@ -373,5 +390,13 @@ func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
 
 // Equals returns if these are from the same struct
 func (sm StructModel) Equals(sm2 StructModel) bool {
-	return sm.rType == sm2.rType
+	if len(sm.rTypes) != len(sm2.rTypes) {
+		return false
+	}
+	for i, t := range sm.rTypes {
+		if t != sm2.rTypes[i] {
+			return false
+		}
+	}
+	return true
 }
