@@ -619,7 +619,7 @@ func Benchmark_RowReader_ScanRows_Faster(b *testing.B) {
 	realBenchmarkScanRows(
 		b, false,
 		func(ts1 *testStruct1) { rr = failOnErrB(b, fErr(ModelStruct(ts1))).CreateReader() },
-		func(rows *sql.Rows, ts1 *testStruct1) error { return rr.ScanRows(rows, ts1) },
+		func(rows *sql.Rows, ts1 *testStruct1) error { return rr.ScanRowsNC(rows, ts1) },
 	)
 }
 
@@ -632,7 +632,7 @@ func Benchmark_RowReader_ScanRows_Multi_Faster(b *testing.B) {
 			rr = failOnErrB(b, fErr(ModelStruct(&ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9))).CreateReader()
 		},
 		func(rows *sql.Rows, ts1 *testStruct1) error {
-			return rr.ScanRows(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
+			return rr.ScanRowsNC(rows, &ts1.P1, &ts1.TestStruct2, ts1.P2, &ts1.TS3, ts1.TS9)
 		},
 	)
 }
@@ -647,7 +647,7 @@ func Benchmark_RowReader_ScanRows_Individual_Faster(b *testing.B) {
 			rr = failOnErrB(b, fErr(ModelStruct(getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...))).CreateReader()
 		},
 		func(rows *sql.Rows, ts1 *testStruct1) error {
-			return rr.ScanRows(rows, getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...)
+			return rr.ScanRowsNC(rows, getPointersForTestStruct(ts1, &timeBuff1, &timeBuff2)...)
 		},
 	)
 }
@@ -750,7 +750,7 @@ func realBenchmarkOneItem(b *testing.B, callback func(*sql.Rows, *struct{ i1 int
 func Benchmark_OneItem_ScanRows_Faster(b *testing.B) {
 	rr := failOnErrB(b, fErr(ModelStruct((*struct{ i1 int })(nil)))).CreateReader()
 	realBenchmarkOneItem(b,
-		func(rows *sql.Rows, ts1 *struct{ i1 int }) error { return rr.ScanRows(rows, ts1) },
+		func(rows *sql.Rows, ts1 *struct{ i1 int }) error { return rr.ScanRowsNC(rows, ts1) },
 	)
 }
 

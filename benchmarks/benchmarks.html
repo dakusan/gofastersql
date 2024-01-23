@@ -45,32 +45,32 @@ window.onload=function() {
 	</tr>
 	<tr><td colspan=20 class=RowTitle>Reads into <span class=ts1>testStruct1</span> (37 fields total)</td></tr>
 	<tr>
-		<td>Faster</td><td>1.136</td><td>-</td>
+		<td>Faster</td><td>1.129</td><td>-</td>
 		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>Multi Faster</td><td>1.272</td><td>112%</td>
+		<td>Multi Faster</td><td>1.215</td><td>108%</td>
 		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=X></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>Individual Faster</td><td>1.895</td><td>167%</td>
+		<td>Individual Faster</td><td>1.593</td><td>141%</td>
 		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>Native</td><td>2.424</td><td>213%</td>
+		<td>Native</td><td>2.397</td><td>212%</td>
 		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>Native Prepared</td><td>2.888</td><td>254%</td>
+		<td>Native Prepared</td><td>2.852</td><td>253%</td>
 		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note>Uses prepared statement instead of a query</td>
 	</tr>
 	<tr>
-		<td>SQLX</td><td>4.973</td><td>438%</td>
+		<td>SQLX</td><td>4.973</td><td>440%</td>
 		<td class=X></td><td class=X></td><td class=X></td><td class=O></td><td class=O></td><td class=X></td><td class=X></td>
 		<td class=Note></td>
 	</tr>
@@ -97,23 +97,20 @@ window.onload=function() {
 	</tr>
 	<tr><td colspan=20 class=RowTitle>Reading into a struct with 1 member</td></tr>
 	<tr>
-		<td>SROne Faster</td><td>.05853</td><td>-</td>
+		<td>SROne Faster</td><td>.05324</td><td>-</td>
 		<td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>SROne ScanRow</td><td>.21000</td><td>359%</td>
+		<td>SROne ScanRow</td><td>.21000</td><td>394%</td>
 		<td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note></td>
 	</tr>
 	<tr>
-		<td>SROne Native</td><td>.05821</td><td>99.5%</td>
+		<td>SROne Native</td><td>.05979</td><td>112%</td>
 		<td class=X></td><td class=X></td><td class=O></td><td class=X></td><td class=X></td><td class=X></td><td class=O></td>
 		<td class=Note></td>
 	</tr>
-
-
-
 </table>
 
 <div id="1">1) Time in seconds to run 1 million iterations of just the scanning. SQL Query/Next functions occur before benchmark timing starts.</div>
