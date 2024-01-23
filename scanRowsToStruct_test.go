@@ -234,12 +234,14 @@ func fErr[V any](val V, err error) valWithErr[V] {
 }
 func failOnErrT[V any](t *testing.T, val valWithErr[V]) V {
 	if val.err != nil {
+		t.Helper()
 		t.Fatal(val.err)
 	}
 	return val.val
 }
 func failOnErrB[V any](b *testing.B, val valWithErr[V]) V {
 	if val.err != nil {
+		b.Helper()
 		b.Fatal(val.err)
 	}
 	return val.val
