@@ -15,6 +15,8 @@ RowReaders, created via StructModel.CreateReader(), are not concurrency safe and
 
 Both ScanRow(s) (plural and singular) functions only accept sql.Rows and not sql.Row due to the golang implementation limitations placed upon sql.Row. Non-plural ScanRow functions automatically call Rows.Next() and Rows.Close() like the native implementation.
 
+The SRErr() and *.ScanRowWErr*() helper functions exist to help emulate sql.Row.Scan error handling functionality.
+
 GoFasterSQL supports the following types, including: typedef derivatives, nested use in structures (including pointers to the types), and nullable derivatives (see nulltypes package).
   - string, []byte, sql.RawBytes (RawBytes converted to []byte for singular RowScan functions)
   - bool
@@ -25,7 +27,7 @@ GoFasterSQL supports the following types, including: typedef derivatives, nested
   - struct
 
 Optimization Information:
-  - The sole instance of reflection following a ModelStruct call occurs during the ScanRow(s) functions, where a verification ensures that the outPointers types align with the types specified in ModelStruct (the *NC versions skip this check).
+  - The sole instance of reflection following a ModelStruct call occurs during the ScanRow(s) functions, where a verification ensures that the outPointers types align with the types specified in ModelStruct (the *NC versions [DoScan(runCheck=false)] skip this check).
   - Creating a StructModel from a single structure requires much less overhead than the alternatives.
   - Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
   - See https://www.github.com/dakusan/gofastersql/blob/master/benchmarks/benchmarks.png for benchmarks.
@@ -48,7 +50,7 @@ Example Usage:
 		loanData []byte
 	}
 
-	var db sql.DB
+	var db *sql.DB
 	var b []book
 	ms, err := gofastersql.ModelStruct(book{})
 	if err != nil {
@@ -63,6 +65,7 @@ Example Usage:
 		}
 		b = append(b, temp)
 	}
+	_ = rows.Close()
 
 So:
 
@@ -110,7 +113,7 @@ func (sm StructModel) CreateReader() *RowReader {
 	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
 }
 
-// SRErr converts a (*sql.Rows, error) tuple into a single variable to pass to ScanRow*WErr() functions
+// SRErr converts a (*sql.Rows, error) tuple into a single variable to pass to *.ScanRowWErr*() functions
 func SRErr(r *sql.Rows, err error) SRErrStruct { return SRErrStruct{r, err} }
 
 // SRErrStruct is returned from SRErr
@@ -123,7 +126,7 @@ type SRErrStruct struct {
 DoScan is the primary row scanning function that all other row scanning functions call. It does an sql.Rows.Scan() into the outPointers variables.
 
   - err: If set then the only actions are that rows is closed and the error is returned
-  - runCheck: If true then an error is returned if outPointers types do not match the RowReader’s input type. If false then the type is not checked.
+  - runCheck: If true then an error is returned if outPointers types do not match the RowReader’s input types. If false then the types are not checked. A check is always performed to make sure the correct number of variables were passed.
   - isSingleRow: If true then rows.Next() is called before the scan and rows.Close() is always called before the function ends
 */
 func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runCheck, isSingleRow bool) error {

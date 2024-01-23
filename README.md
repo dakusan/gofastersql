@@ -7,6 +7,7 @@ GoFasterSQL is a tool designed to enhance the efficiency and simplicity of scann
 
 The flaw in the native library scanning process is its repetitive and time-consuming type determination for each row scan. It must match each field’s type with its native counterpart before converting the data string (byte array). Furthermore, the requirement to specify each individual field for scanning is tedious.
 
+### How this works:
 GoFasterSQL instead precalculates string-to-type conversions for each field, utilizing pointers to dedicated conversion functions. This approach eliminates the need for type lookups during scanning, vastly improving performance. The library offers a 2 to 2.5 times speed increase compared to native scan methods (5*+ vs sqlx), a boost that varies with the number of items in each scan. Moreover, its automatic structure determination feature is a significant time-saver during coding.
 
 The library’s `ModelStruct` function, upon its first invocation for a list of types, determines the structure of those types through recursive reflection. These structures are then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
@@ -15,8 +16,12 @@ The library’s `ModelStruct` function, upon its first invocation for a list of 
 
 `RowReader`s, created via `StructModel.CreateReader()`, are not concurrency safe and can only be used in one goroutine at a time.
 
+### sql.Rows only (no sql.Row)
 Both `ScanRow(s)` (plural and singular) functions only accept `sql.Rows` and not `sql.Row` due to the golang implementation limitations placed upon `sql.Row`. Non-plural `ScanRow` functions automatically call `Rows.Next()` and `Rows.Close()` like the native implementation.
 
+The `SRErr()` and `*.ScanRowWErr*()` helper functions exist to help emulate sql.Row.Scan error handling functionality. See [example #2](#Example-2) below.
+
+### Type support:
 GoFasterSQL supports the following types, including: typedef derivatives, nested use in structures (including pointers to the types), and nullable derivatives (see nulltypes package).
   - `string`, `[]byte`, `sql.RawBytes` *(RawBytes converted to []byte for singular RowScan functions)*
   - `bool`
@@ -28,15 +33,22 @@ GoFasterSQL supports the following types, including: typedef derivatives, nested
 
 GoFasterSQL is available under the same style of BSD license as the Go language, which can be found in the LICENSE file.
 
-Optimization information:
-* The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointers` types align with the types specified in `ModelStruct` (the *NC versions skip this check).
+### Optimization information:
+* The sole instance of reflection following a `ModelStruct` call occurs during the `ScanRow(s)` functions, where a verification ensures that the `outPointers` types align with the types specified in `ModelStruct` (the *NC versions [`DoScan(runCheck=false)`] skip this check).
 * Creating a StructModel from a single structure requires much less overhead than the alternatives.
 * Nested struct pointers add a very tiny bit of extra overhead over nested non-pointers.
-* See [here](benchmarks/benchmarks.png) for benchmarks [html file <sub>cannot be rendered in GitHub</sub>](benchmarks/benchmarks.html).
+* See [here](benchmarks/benchmarks.png) for benchmarks [[html file](benchmarks/benchmarks.html) <sup>cannot be rendered in GitHub</sup>].
 
 # Example Usage
 ## Example #1
 ```go
+package main
+import (
+	"database/sql"
+	gf "github.com/dakusan/gofastersql"
+	_ "github.com/go-sql-driver/mysql"
+)
+
 type cardCatalogIdentifier uint
 type book struct {
 	name string
@@ -53,20 +65,25 @@ type loans struct {
 	loanData []byte
 }
 
-var db sql.DB
-var b []book
-ms, err := gofastersql.ModelStruct(book{})
-if err != nil {
-	panic(err)
-}
-msr := ms.CreateReader()
-rows, _ := db.Query("SELECT * FROM books")
-for rows.Next() {
-	temp := book{l:new(loans)}
-	if err := msr.ScanRows(rows, &temp); err != nil {
+func main() {
+	var db *sql.DB
+	//Log into db and create books table here: CREATE TABLE books (name varchar(50), cardCatalogID int, currentBorrower varchar(50), currentBorrowerId int, libraryID tinyint, loanData varchar(50)) ENGINE=MEMORY
+
+	var b []book
+	ms, err := gf.ModelStruct(book{})
+	if err != nil {
 		panic(err)
 	}
-	b = append(b, temp)
+	msr := ms.CreateReader()
+	rows, _ := db.Query("SELECT * FROM books")
+	for rows.Next() {
+		temp := book{l:new(loans)}
+		if err := msr.ScanRows(rows, &temp); err != nil {
+			panic(err)
+		}
+		b = append(b, temp)
+	}
+	_ = rows.Close()
 }
 ```
 So:<br>
@@ -85,12 +102,12 @@ type moo struct { cow, calf nulltypes.NullInt64 }
 var fooVar foo
 var mooVar moo
 
-if err := gofastersql.ScanRowWErr(gofastersql.SRErr(db.Query("SELECT 2, 4, 8, null")), &fooVar, &mooVar); err != nil {
+if err := gf.ScanRowWErr(gf.SRErr(db.Query("SELECT 2, 4, 8, null")), &fooVar, &mooVar); err != nil {
 	panic(err)
 }
 
 //This is equivalent to the above statement but takes a little less processing
-if err := gofastersql.ScanRowWErr(gofastersql.SRErr(db.Query("SELECT 2, 4, 8, null")), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
+if err := gf.ScanRowWErr(gf.SRErr(db.Query("SELECT 2, 4, 8, null")), &struct {*foo; *moo}{&fooVar, &mooVar}); err != nil {
 	panic(err)
 }
 
