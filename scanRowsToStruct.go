@@ -100,15 +100,15 @@ type RowReader struct {
 	rawBytesArr []sql.RawBytes
 	rawBytesAny []any            //This holds pointers to each member of rawBytesArr
 	pointers    []unsafe.Pointer //Used to calculate struct pointer locations. Index 0 is the root struct pointer
-	rrType      RowReaderType
+	rrType      rowReaderType
 }
 
-// RowReaderType specifies extensions onto RowReader
-type RowReaderType uint8
+// rowReaderType specifies extensions onto RowReader
+type rowReaderType uint8
 
 const (
-	RRTStandard RowReaderType = 0               //Standard RowReader
-	RRTNamed    RowReaderType = 1 << (iota - 1) //RowReaderNamed (matches against select query column names instead of indexes)
+	rrtStandard rowReaderType = 0               //Standard RowReader
+	rrtNamed    rowReaderType = 1 << (iota - 1) //RowReaderNamed (matches against select query column names instead of indexes)
 )
 
 // CreateReader creates a RowReader from the StructModel
@@ -119,7 +119,7 @@ func (sm StructModel) CreateReader() *RowReader {
 		rba[i] = &rb[i]
 	}
 
-	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1), RRTStandard}
+	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1), rrtStandard}
 }
 
 // SRErr converts a (*sql.Rows, error) tuple into a single variable to pass to *.ScanRowWErr*() functions
@@ -177,7 +177,7 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runChe
 	}
 
 	//Handle extensions
-	if rr.rrType != RRTStandard {
+	if rr.rrType != rrtStandard {
 		rrn := (*RowReaderNamed)(unsafe.Pointer(rr))
 		if !rrn.hasAlreadyMatchedCols || rrn.hasError {
 			if err := rrn.initNamed(rows); err != nil {

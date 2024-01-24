@@ -26,13 +26,13 @@ func (sm StructModel) CreateReaderNamed() *RowReader {
 	rr := &RowReaderNamed{
 		RowReader: *sm.CreateReader(),
 	}
-	rr.rrType = RRTNamed
+	rr.rrType = rrtNamed
 	return &rr.RowReader
 }
 
 func (rrn *RowReaderNamed) initNamed(rows *sql.Rows) error {
 	//Quick exit conditions
-	if rrn.rrType != RRTNamed {
+	if rrn.rrType != rrtNamed {
 		return errors.New("Not a RowReaderNamed")
 	}
 	if rrn.hasError {
