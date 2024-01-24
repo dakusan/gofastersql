@@ -30,6 +30,7 @@ type structField struct {
 	converter    converterFunc    //The conversion function
 	pointerIndex int              //The structure index to be used for offset (RowReader.pointers[pointerIndex], which is derived from StructModel.pointers)
 	name         string           //The recursed name of the member
+	baseName     string           //The name of the member
 	isPointer    bool             //If the member is a pointer
 	flags        structFieldFlags //Flags about the member
 }
@@ -207,7 +208,7 @@ func createStructModelFromStruct(t reflect.Type) (StructModel, error) {
 				}
 
 				//Store the member
-				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentStructIndex, parentName + fld.Name, isPointer, sff}
+				ret.fields[fieldPos] = structField{parentOffset + fld.Offset, fn, parentStructIndex, parentName + fld.Name, fld.Name, isPointer, sff}
 				fieldPos++
 			}
 
@@ -343,7 +344,7 @@ func getMultipleStructsAsStructModel(vars []any) (StructModel, error) {
 	curPointerIndex, curFieldIndex := 0, 0
 	for smIndex, sm := range varSMs {
 		//Store the variable as a pointer
-		newSM.pointers[curPointerIndex] = structPointer{0, pointerSize * uintptr(smIndex), "Param#" + strconv.Itoa(smIndex)}
+		newSM.pointers[curPointerIndex] = structPointer{0, pointerSize * uintptr(smIndex), "Param" + strconv.Itoa(smIndex)}
 		curPointerIndex++
 
 		//Copy over its members
@@ -374,7 +375,7 @@ func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
 	}
 
 	sm := StructModel{
-		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), false, sff}},
+		[]structField{{0, convFunc, 0, "Scalar-" + t.Name(), "", false, sff}},
 		nil, []reflect.Type{t}, false,
 	}
 
@@ -388,7 +389,7 @@ func createStructModelFromScalar(t reflect.Type) (StructModel, error) {
 
 //-------------------------------------Misc-------------------------------------
 
-// Equals returns if these are from the same struct
+// Equals returns if these are from the same structs
 func (sm StructModel) Equals(sm2 StructModel) bool {
 	if len(sm.rTypes) != len(sm2.rTypes) {
 		return false

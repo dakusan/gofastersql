@@ -12,14 +12,14 @@ GoFasterSQL instead precalculates string-to-type conversions for each field, uti
 
 The library’s `ModelStruct` function, upon its first invocation for a list of types, determines the structure of those types through recursive reflection. These structures are then cached, allowing for swift reuse in subsequent calls to `ModelStruct`. This process needs to be executed only once, and its output is concurrency-safe.
 
-`ModelStruct` flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name.
+`ModelStruct` flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name. To match by name, use a `RowReaderNamed` via `StructModel.CreateReaderNamed()` (See [example #2](#Example-2) below).
 
 `RowReader`s, created via `StructModel.CreateReader()`, are not concurrency safe and can only be used in one goroutine at a time.
 
 ### sql.Rows only (no sql.Row)
 Both `ScanRow(s)` (plural and singular) functions only accept `sql.Rows` and not `sql.Row` due to the golang implementation limitations placed upon `sql.Row`. Non-plural `ScanRow` functions automatically call `Rows.Next()` and `Rows.Close()` like the native implementation.
 
-The `SRErr()` and `*.ScanRowWErr*()` helper functions exist to help emulate sql.Row.Scan error handling functionality. See [example #2](#Example-2) below.
+The `SRErr()` and `*.ScanRowWErr*()` helper functions exist to help emulate sql.Row.Scan error handling functionality. See [example #3](#Example-3) below.
 
 ### Type support:
 GoFasterSQL supports the following types, including: typedef derivatives, nested use in structures (including pointers to the types), and nullable derivatives (see nulltypes package).
@@ -95,6 +95,29 @@ and is much faster to boot!
 It is also equivalent to (but a little faster than): <code>ModelStruct(<b>...</b>).CreateReader().ScanRows(rows, &temp.name, &temp.cardCatalogID, &temp.student, temp.l)</code><br>
 
 ## Example #2
+Reading a single row directly into multiple variables by name
+```go
+//Replacement of main() from above example
+var db *sql.DB
+var b []book
+ms, err := gf.ModelStruct(loans{}, (*student)(nil), cardCatalogIdentifier(0), "") //These are not in the same order as the below sql query
+if err != nil {
+	panic(err)
+}
+msr := ms.CreateReaderNamed()
+//Param# names required due to (anonymous) top level scalars
+rows, _ := db.Query("SELECT name AS Param3, cardCatalogID AS Param2, currentBorrower, currentBorrowerId, libraryID, loanData FROM books")
+for rows.Next() {
+	temp := book{l:new(loans)}
+	if err := msr.ScanRows(rows, temp.l, &temp.student, &temp.cardCatalogID, &temp.name); err != nil {
+		panic(err)
+	}
+	b = append(b, temp)
+}
+_ = rows.Close()
+```
+
+## Example #3
 Reading a single row directly into multiple structs
 ```go
 type foo struct { bar, baz int }
@@ -128,3 +151,10 @@ GoFasterSQL is available using the standard go get command.
 Install by running:
 
 go get github.com/dakusan/gofastersql
+
+# TODO:
+The column name matching algorithm for `CreateReaderNamed` could be greatly improved. If there turns out to be a large need for this by users, I’ll rework it. Right now it works by matching each column in order via the following formula:
+1) Search through each field in order:
+    1) Skip any field that has already been matched
+    2) Find any field whose full path matches the column name exactly and use it as the match
+    3) Find exactly 1 field whose base name matches the column name exactly. If more than 1 is found, an error is returned.

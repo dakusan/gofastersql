@@ -9,7 +9,7 @@ GoFasterSQL instead precalculates string-to-type conversions for each field, uti
 
 The library’s ModelStruct function, upon its first invocation for a list of types, determines the structure of those types through recursive reflection. These structures are then cached, allowing for swift reuse in subsequent calls to ModelStruct. This process needs to be executed only once, and its output is concurrency-safe.
 
-ModelStruct flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name.
+ModelStruct flattens all structures and records their flattened member indexes for reading into; so row scanning is by field index, not by name. To match by name, use a RowReaderNamed via StructModel.CreateReaderNamed().
 
 RowReaders, created via StructModel.CreateReader(), are not concurrency safe and can only be used in one goroutine at a time.
 
@@ -100,7 +100,16 @@ type RowReader struct {
 	rawBytesArr []sql.RawBytes
 	rawBytesAny []any            //This holds pointers to each member of rawBytesArr
 	pointers    []unsafe.Pointer //Used to calculate struct pointer locations. Index 0 is the root struct pointer
+	rrType      RowReaderType
 }
+
+// RowReaderType specifies extensions onto RowReader
+type RowReaderType uint8
+
+const (
+	RRTStandard RowReaderType = 0               //Standard RowReader
+	RRTNamed    RowReaderType = 1 << (iota - 1) //RowReaderNamed (matches against select query column names instead of indexes)
+)
 
 // CreateReader creates a RowReader from the StructModel
 func (sm StructModel) CreateReader() *RowReader {
@@ -110,7 +119,7 @@ func (sm StructModel) CreateReader() *RowReader {
 		rba[i] = &rb[i]
 	}
 
-	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1)}
+	return &RowReader{sm, rb, rba, make([]unsafe.Pointer, len(sm.pointers)+1), RRTStandard}
 }
 
 // SRErr converts a (*sql.Rows, error) tuple into a single variable to pass to *.ScanRowWErr*() functions
@@ -165,6 +174,16 @@ func (rr *RowReader) DoScan(rows *sql.Rows, outPointers []any, err error, runChe
 	//Nil out all values in rawBytes in case sql attempts to read a non []byte into them (security vulnerability bug in golang sql code)
 	for i := range rr.rawBytesArr {
 		rr.rawBytesArr[i] = nil
+	}
+
+	//Handle extensions
+	if rr.rrType != RRTStandard {
+		rrn := (*RowReaderNamed)(unsafe.Pointer(rr))
+		if !rrn.hasAlreadyMatchedCols || rrn.hasError {
+			if err := rrn.initNamed(rows); err != nil {
+				return err
+			}
+		}
 	}
 
 	//Run the scan and conversion
@@ -232,24 +251,31 @@ This is essentially the same as:
 
 	ModelStruct(outPointers...).CreateReader().ScanRow(row, outPointers...)
 
-If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses a mutex read lock and a few allocations.
+If you are scanning a lot of rows it is recommended to use a RowReader as it bypasses mutex read locks and a few allocations.
 In some cases this may even be slower than the native sql.Rows.Scan() method. What speeds this library up so much is the preprocessing done before the ScanRow(s) functions are called and a lot of that is lost in gofastersql.ScanRow().
 */
 func ScanRow(rows *sql.Rows, outPointers ...any) error {
-	//Make sure all variables are pointers
-	for i, v := range outPointers {
-		if reflect.TypeOf(v).Kind() != reflect.Pointer {
-			runSafeCloseRow(rows)
-			return fmt.Errorf("Parameter #%d is not a pointer", i+1)
-		}
-	}
-
-	if sm, err := ModelStruct(outPointers...); err != nil {
-		runSafeCloseRow(rows)
+	if sm, err := scanRowModelStruct(rows, outPointers); err != nil {
 		return err
 	} else {
 		return sm.CreateReader().DoScan(rows, outPointers, nil, false, true)
 	}
+}
+
+// Make sure all variables are pointers
+func scanRowModelStruct(rows *sql.Rows, outPointers []any) (*StructModel, error) {
+	for i, v := range outPointers {
+		if reflect.TypeOf(v).Kind() != reflect.Pointer {
+			runSafeCloseRow(rows)
+			return nil, fmt.Errorf("Parameter #%d is not a pointer", i+1)
+		}
+	}
+
+	sm, err := ModelStruct(outPointers...)
+	if err != nil {
+		runSafeCloseRow(rows)
+	}
+	return &sm, err
 }
 
 // ScanRowWErr : See ScanRow and SRErr

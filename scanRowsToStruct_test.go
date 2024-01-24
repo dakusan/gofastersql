@@ -586,6 +586,102 @@ func TestRawBytes(t *testing.T) {
 	})
 }
 
+func TestNamed(t *testing.T) {
+	//Connect to the database and create a transaction
+	tx := failOnErrT(t, fErr(setupSQLConnect()))
+	defer rollbackTransactionAndRows(tx, nil, 4)
+
+	//Test structure and results
+	type T1 struct {
+		A, BC int
+	}
+	type t2 struct {
+		C string
+		T1
+		D []byte
+	}
+	type t3 struct {
+		E   float64
+		T2V *t2
+		F   bool
+		A   int
+	}
+	type t4 struct {
+		T1V1, T1V2 T1
+	}
+	const expectedResult = `{"E":1.1,"T2V":{"C":"str","A":5,"BC":10,"D":"YWI="},"F":true,"A":20}`
+
+	//Create a temporary table and fill it with values
+	failOnErrT(t, fErr(tx.Exec("CREATE TEMPORARY TABLE goTest4 (`T2V.T1.A` int, BC int, C varchar(20), D varchar(20), E float8, F boolean, A int) ENGINE=MEMORY")))
+	failOnErrT(t, fErr(tx.Exec(`INSERT INTO goTest4 VALUES (?, ?, ?, ?, ?, ?, ?)`, 5, 10, "str", "ab", 1.1, 1, 20)))
+
+	t.Run("In order", func(t *testing.T) {
+		t3v := t3{T2V: new(t2)}
+		failOnErrT(t, fErr(0, ScanRow(failOnErrT(t, fErr(tx.Query("SELECT E, C, `T2V.T1.A`, BC, D, F, A FROM goTest4"))), &t3v)))
+		if str := failOnErrT(t, fErr(json.Marshal(t3v))); string(str) != expectedResult {
+			t.Fatal("Structure json marshal did not match: " + string(str))
+		}
+	})
+
+	t.Run("Out of order", func(t *testing.T) {
+		t3v := t3{T2V: new(t2)}
+		rrn := failOnErrT(t, fErr(ModelStruct(&t3v))).CreateReaderNamed()
+		rows := failOnErrT(t, fErr(tx.Query("SELECT * FROM goTest4")))
+		defer func() { safeCloseRows(rows) }()
+		rows.Next()
+		failOnErrT(t, fErr(0, rrn.ScanRows(rows, &t3v)))
+		if str := failOnErrT(t, fErr(json.Marshal(t3v))); string(str) != expectedResult {
+			t.Fatal("Structure json marshal #1 did not match: " + string(str))
+		}
+
+		t3v2 := t3{T2V: new(t2)}
+		failOnErrT(t, fErr(0, rrn.ScanRows(rows, &t3v2)))
+		if str := failOnErrT(t, fErr(json.Marshal(t3v2))); string(str) != expectedResult {
+			t.Fatal("Structure json marshal #2 did not match: " + string(str))
+		}
+	})
+
+	t.Run("Out of order multi", func(t *testing.T) {
+		t3v := t3{T2V: new(t2)}
+		rrn := failOnErrT(t, fErr(ModelStruct(&t3v.E, t3v.T2V, &t3v.F, &t3v.A))).CreateReaderNamed()
+		rows := failOnErrT(t, fErr(tx.Query("SELECT A AS Param3, BC AS `T1.BC`, C, D, E AS Param0, F AS Param2, `T2V.T1.A` AS A FROM goTest4")))
+		failOnErrT(t, fErr(0, rrn.ScanRow(rows, &t3v.E, t3v.T2V, &t3v.F, &t3v.A)))
+		if str := failOnErrT(t, fErr(json.Marshal(t3v))); string(str) != expectedResult {
+			t.Fatal("Structure json marshal did not match: " + string(str))
+		}
+	})
+
+	t.Run("Double variable name", func(t *testing.T) {
+		t3v := t3{T2V: new(t2)}
+		failOnErrT(t, fErr(0, ScanRowNamedWErr(SRErr(tx.Query("SELECT A, BC, C, D, E, F, `T2V.T1.A` AS A FROM goTest4")), &t3v)))
+		if str := failOnErrT(t, fErr(json.Marshal(t3v))); string(str) != expectedResult {
+			t.Fatal("Structure json marshal did not match: " + string(str))
+		}
+	})
+
+	t.Run("Ambiguous variable valid", func(t *testing.T) {
+		var t4v t4
+		failOnErrT(t, fErr(0, ScanRowNamedWErr(SRErr(tx.Query("SELECT `T2V.T1.A` as `T1V1.A`, `T2V.T1.A`+1 as `T1V2.A`, BC as `T1V1.BC`, BC+1 as `T1V2.BC` FROM goTest4")), &t4v)))
+		if t4v.T1V1.A != 5 || t4v.T1V2.A != 6 || t4v.T1V1.BC != 10 || t4v.T1V2.BC != 11 {
+			t.Fatal(fmt.Sprintf("Values to not match (%d,%d,%d,%d)!=(%d,%d,%d,%d)", t4v.T1V1.A, t4v.T1V2.A, t4v.T1V1.BC, t4v.T1V2.BC, 5, 6, 10, 11))
+		}
+	})
+
+	t.Run("Ambiguous variable missing", func(t *testing.T) {
+		var t4v t4
+		if err := ScanRowNamedWErr(SRErr(tx.Query("SELECT `T2V.T1.A` as `T1V1.A`, `T2V.T1.A`+1 as `T1V2.A`, BC as `T1V1.BC`, BC+1 as `T1V2.BD` FROM goTest4")), &t4v); err == nil || err.Error() != "0 matches found for column “T1V2.BD”" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+
+	t.Run("Ambiguous variable invalid", func(t *testing.T) {
+		var t4v t4
+		if err := ScanRowNamedWErr(SRErr(tx.Query("SELECT A, A as `T1V2.A`, BC as `T1V1.BC`, BC as `T1V2.BC` FROM goTest4")), &t4v); err == nil || err.Error() != "2 matches found for column “A”" {
+			t.Fatal(fmt.Sprintf("Incorrect error received: %v", err))
+		}
+	})
+}
+
 //------------------------------Benchmark ScanRows------------------------------
 
 func realBenchmarkScanRows(b *testing.B, usePreparedQuery bool, preCallback func(*testStruct1), callback func(*sql.Rows, *testStruct1) error) {
