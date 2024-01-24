@@ -3,9 +3,10 @@
 //This file is ignored so sqlx import is not attempted
 //A few modifications need to be made elsewhere for all tests to run together too (see customTime)
 
-package gofastersql
+package test
 
 import (
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
 	"testing"
 	"time"

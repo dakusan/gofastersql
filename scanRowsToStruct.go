@@ -370,3 +370,10 @@ func rowNext(rows *sql.Rows) bool {
 var runSafeCloseRow = safeRowClose
 var runCloseRow = rowClose
 var runRowNext = rowNext
+
+// XBenchmarkSetup sets up the class for benchmark testing. DO NOT USE THIS FUNCTION
+func XBenchmarkSetup() {
+	runSafeCloseRow = func(r *sql.Rows) {}
+	runCloseRow = func(r *sql.Rows) error { return nil }
+	runRowNext = func(r *sql.Rows) bool { return true }
+}
