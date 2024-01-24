@@ -117,6 +117,27 @@ for rows.Next() {
 _ = rows.Close()
 ```
 
+If you were reading just 1 row this could be simplified to:
+```go
+db *sql.DB
+myBook := book{l: new(loans)}
+if err := gf.ScanRowNamedWErr(
+	gf.SRErr(db.Query("SELECT name AS Param3, cardCatalogID AS Param2, currentBorrower, currentBorrowerId, libraryID, loanData FROM books")),
+	myBook.l, &myBook.student, &myBook.cardCatalogID, &myBook.name,
+); err != nil {
+	panic(err)
+}
+```
+
+or most simply:
+```go
+db *sql.DB
+myBook := book{l: new(loans)}
+if err := gf.ScanRowNamedWErr(gf.SRErr(db.Query("SELECT * FROM books")), &myBook); err != nil {
+	panic(err)
+}
+```
+
 ## Example #3
 Reading a single row directly into multiple structs
 ```go
